@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck:*)",
+      "Bash(timeout 10 npm run dev:*)",
+      "Bash(timeout 15 npm run dev:*)",
+      "Bash(netstat:*)",
+      "Bash(PORT=3001 timeout 15 npm run dev:*)",
+      "Bash(PORT=3001 HOST=127.0.0.1 npm run dev:*)"
+    ]
+  }
+}

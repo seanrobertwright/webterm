@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 142 76% 36%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 142 76% 36%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 142 76% 36%;
+  --radius: 0.5rem;
+  
+  /* Terminal specific */
+  --terminal-bg: #0a0a0a;
+  --terminal-fg: #00ff00;
+  --terminal-cursor: #00ff00;
+  --terminal-selection: rgba(0, 255, 0, 0.3);
+  --pane-border: #1a1a2e;
+  --pane-border-focus: #00ff00;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* Terminal container styles */
+.terminal-container {
+  background-color: var(--terminal-bg);
+  border: 1px solid var(--pane-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.terminal-container.focused {
+  border-color: var(--pane-border-focus);
+  box-shadow: 0 0 10px rgba(0, 255, 0, 0.2);
+}
+
+/* Pane splitter */
+.pane-splitter {
+  background-color: var(--pane-border);
+  transition: background-color 0.2s ease;
+}
+
+.pane-splitter:hover {
+  background-color: var(--pane-border-focus);
+}
+
+/* Connection status */
+.connection-status {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.connection-status.connected {
+  background-color: rgba(0, 255, 0, 0.2);
+  color: #00ff00;
+}
+
+.connection-status.disconnected {
+  background-color: rgba(255, 0, 0, 0.2);
+  color: #ff4444;
+}
+
+.connection-status.connecting {
+  background-color: rgba(255, 255, 0, 0.2);
+  color: #ffff00;
+}
+
+/* Glitch effect for headers */
+.glitch-text {
+  text-shadow: 
+    0.05em 0 0 rgba(255, 0, 0, 0.75),
+    -0.025em -0.05em 0 rgba(0, 255, 0, 0.75),
+    0.025em 0.05em 0 rgba(0, 0, 255, 0.75);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
