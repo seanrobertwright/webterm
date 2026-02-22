@@ -86,12 +86,17 @@ export function Header({
         ${className}
       `}
     >
-      {/* Left: Menu button */}
-      <div className="flex items-center">
+      {/* Left: Logo + Menu button */}
+      <div className="flex items-center gap-1">
+        <img
+          src="/favicon.ico"
+          alt="WebTerm"
+          className="w-6 h-6"
+        />
         <button
           onClick={onMenuClick}
           className="
-            p-2 -ml-2
+            p-2
             text-gray-400 hover:text-green-400
             rounded
             transition-colors
