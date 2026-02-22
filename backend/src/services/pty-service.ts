@@ -69,6 +69,12 @@ export class PtyManager {
       ...additionalEnv,
     };
 
+    // Remove Claude Code env vars so spawned shells don't think
+    // they're inside a Claude Code instance
+    delete env['CLAUDECODE'];
+    delete env['CLAUDE_CODE_SSE_PORT'];
+    delete env['CLAUDE_CODE_ENTRYPOINT'];
+
     // On Windows, ensure SystemRoot is set (required for PowerShell)
     if (os.platform() === 'win32') {
       if (!env['SystemRoot']) {

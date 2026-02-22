@@ -35,7 +35,7 @@ function getEnvNumber(key: string, defaultValue: number): number {
 }
 
 export const config: Config = {
-  port: getEnvNumber('PORT', 3000),
+  port: getEnvNumber('PORT', 9174),
   host: getEnvString('HOST', 'localhost'),
   dbPath: getEnvString('WEBTERM_DB_PATH', './data/webterm.db'),
   logLevel: getEnvString('LOG_LEVEL', 'info') as Config['logLevel'],

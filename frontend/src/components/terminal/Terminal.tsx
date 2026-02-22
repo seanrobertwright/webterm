@@ -1,5 +1,6 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
+import type { ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -14,6 +15,10 @@ export interface TerminalHandle {
   clear: () => void;
   /** Get terminal dimensions */
   getDimensions: () => { cols: number; rows: number };
+  /** Get selected text from the terminal */
+  getSelection: () => string;
+  /** Check if the terminal has a selection */
+  hasSelection: () => boolean;
 }
 
 export interface TerminalProps {
@@ -27,11 +32,38 @@ export interface TerminalProps {
   fontSize?: number;
   /** Custom font family */
   fontFamily?: string;
+  /** Custom terminal theme */
+  theme?: ITheme;
   /** Additional CSS classes */
   className?: string;
 }
 
 /** Base terminal component using xterm.js with WebGL rendering */
+const defaultTheme: ITheme = {
+  background: '#0a0a0a',
+  foreground: '#00ff00',
+  cursor: '#00ff00',
+  cursorAccent: '#0a0a0a',
+  selectionBackground: 'rgba(0, 255, 0, 0.3)',
+  selectionForeground: '#ffffff',
+  black: '#000000',
+  red: '#ff5555',
+  green: '#50fa7b',
+  yellow: '#f1fa8c',
+  blue: '#6272a4',
+  magenta: '#ff79c6',
+  cyan: '#8be9fd',
+  white: '#f8f8f2',
+  brightBlack: '#44475a',
+  brightRed: '#ff6e6e',
+  brightGreen: '#69ff94',
+  brightYellow: '#ffffa5',
+  brightBlue: '#d6acff',
+  brightMagenta: '#ff92df',
+  brightCyan: '#a4ffff',
+  brightWhite: '#ffffff',
+};
+
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
   (
     {
@@ -40,6 +72,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       isFocused = false,
       fontSize = 14,
       fontFamily = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
+      theme,
       className = '',
     },
     ref
@@ -68,6 +101,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           cols: terminalRef.current?.cols ?? 80,
           rows: terminalRef.current?.rows ?? 24,
         }),
+        getSelection: () => terminalRef.current?.getSelection() ?? '',
+        hasSelection: () => terminalRef.current?.hasSelection() ?? false,
       }),
       []
     );
@@ -105,30 +140,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         fontSize,
         fontFamily,
         scrollback: 10000,
-        theme: {
-          background: '#0a0a0a',
-          foreground: '#00ff00',
-          cursor: '#00ff00',
-          cursorAccent: '#0a0a0a',
-          selectionBackground: 'rgba(0, 255, 0, 0.3)',
-          selectionForeground: '#ffffff',
-          black: '#000000',
-          red: '#ff5555',
-          green: '#50fa7b',
-          yellow: '#f1fa8c',
-          blue: '#6272a4',
-          magenta: '#ff79c6',
-          cyan: '#8be9fd',
-          white: '#f8f8f2',
-          brightBlack: '#44475a',
-          brightRed: '#ff6e6e',
-          brightGreen: '#69ff94',
-          brightYellow: '#ffffa5',
-          brightBlue: '#d6acff',
-          brightMagenta: '#ff92df',
-          brightCyan: '#a4ffff',
-          brightWhite: '#ffffff',
-        },
+        theme: theme ?? defaultTheme,
         allowProposedApi: true,
       });
 
@@ -199,7 +211,27 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         terminalRef.current = null;
         fitAddonRef.current = null;
       };
-    }, [fontSize, fontFamily, onData, onResize, debouncedFit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onData, onResize, debouncedFit]);
+
+    // Reactively update terminal settings without recreating the instance
+    useEffect(() => {
+      const terminal = terminalRef.current;
+      if (!terminal) return;
+
+      terminal.options.fontSize = fontSize;
+      terminal.options.fontFamily = fontFamily;
+      terminal.options.theme = theme ?? defaultTheme;
+
+      // Refit after settings change
+      if (fitAddonRef.current) {
+        try {
+          fitAddonRef.current.fit();
+        } catch {
+          // ignore fit errors during transitions
+        }
+      }
+    }, [fontSize, fontFamily, theme]);
 
     // Handle focus changes
     useEffect(() => {

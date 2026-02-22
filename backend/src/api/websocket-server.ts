@@ -15,9 +15,11 @@ import {
   MessageType,
 } from './protocol.js';
 import { ptyManager } from '../services/pty-service.js';
+import { sessionService } from '../services/session-service.js';
 import type { Pane, Layout, WindowWithPanes } from '@webterm/shared/models';
 import {
   createTerminalContext,
+  setWindowContext,
   handleResize,
   handleCreate,
   handleClose,
@@ -148,24 +150,20 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
   let isReconnect = false;
 
   if (requestedSessionId) {
-    // Attempt to resume existing session
-    try {
-      // TODO: Fetch session from database
-      // session = await sessionService.getSession(requestedSessionId);
-      
-      // Placeholder session
+    // Attempt to resume existing session from database
+    const existingSession = sessionService.getSession(requestedSessionId);
+    if (existingSession) {
       session = {
-        id: requestedSessionId,
-        name: 'Resumed Session',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        activeWindowId: null,
+        id: existingSession.id,
+        name: existingSession.name,
+        createdAt: existingSession.createdAt,
+        updatedAt: existingSession.updatedAt,
+        activeWindowId: existingSession.activeWindowId,
       };
       sessionId = requestedSessionId;
       isReconnect = true;
-
-      logger.info('Session resumed', { sessionId });
-    } catch {
+      logger.info('Session resumed from DB', { sessionId });
+    } else {
       logger.warn('Session not found, creating new', { requestedSessionId });
       sessionId = randomUUID();
       session = createNewSession(sessionId);
@@ -236,7 +234,6 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     // Spawn PTY for the initial pane
     const ptyInstance = ptyManager.spawn(paneId, {
       shell: 'default',
-      cwd: undefined,
       cols: 80,
       rows: 24,
     });
@@ -244,7 +241,7 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     const pane: Pane = {
       id: paneId,
       windowId,
-      shell: ptyInstance.shell,
+      shell: 'default',
       cwd: ptyInstance.cwd,
       cols: 80,
       rows: 24,
@@ -265,19 +262,57 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
       panes: [pane],
     };
 
+    // Set window context on terminal handler so split/close have layout access
+    setWindowContext(terminalCtx, windowId, layout);
+
     // Send window created message to initialize the client
     sendWindowCreated(ws, window);
     logger.info('Initial window created', { windowId, sessionId, paneId });
   }
 
-  // If reconnecting, check for buffered output
+  // If reconnecting, restore windows/layout and send buffered output
   if (isReconnect) {
+    const restoredSession = sessionService.getSession(sessionId);
+    if (restoredSession) {
+      // Send each window's layout to the client and set up terminal context
+      for (const win of restoredSession.windows) {
+        // Re-spawn PTYs for panes that aren't already running
+        for (const pane of win.panes) {
+          if (!ptyManager.hasPty(pane.id)) {
+            const spawnOpts: { shell: typeof pane.shell; cols: number; rows: number; cwd?: string } = {
+              shell: pane.shell,
+              cols: pane.cols,
+              rows: pane.rows,
+            };
+            if (pane.cwd !== null) {
+              spawnOpts.cwd = pane.cwd;
+            }
+            ptyManager.spawn(pane.id, spawnOpts);
+          }
+        }
+
+        sendWindowCreated(ws, win);
+      }
+
+      // Set terminal context to the active window
+      const activeWin = restoredSession.windows.find(w => w.id === restoredSession.activeWindowId)
+        ?? restoredSession.windows[0];
+      if (activeWin) {
+        setWindowContext(terminalCtx, activeWin.id, activeWin.layout);
+      }
+
+      logger.info('Session restored from DB', {
+        sessionId,
+        windowCount: restoredSession.windows.length,
+      });
+    }
+
+    // Send buffered output
     const buffer = serverState?.disconnectedBuffers.get(sessionId);
     if (buffer && buffer.data.size > 0) {
       const missedPaneIds = Array.from(buffer.data.keys());
       sendReconnected(ws, sessionId, missedPaneIds);
 
-      // Send buffered output
       for (const [paneId, chunks] of buffer.data) {
         for (const chunk of chunks) {
           sendBinaryOutput(ws, paneId, chunk);

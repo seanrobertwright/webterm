@@ -13,7 +13,7 @@ import type { ServerMessage } from '@webterm/shared/index';
  * Set up message handlers that update app state based on WebSocket messages
  */
 export function useMessageHandlers(): void {
-  const { setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode } = usePaneStore();
+  const { setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, setActivePane } = usePaneStore();
   const { addWindow, removeWindow } = useSessionStore();
 
   useEffect(() => {
@@ -49,6 +49,8 @@ export function useMessageHandlers(): void {
           const { pane, layout } = message.payload;
           addPane(pane);
           setLayout(layout);
+          // Auto-focus the newly created pane
+          setActivePane(pane.id);
           break;
         }
 
@@ -96,5 +98,5 @@ export function useMessageHandlers(): void {
     });
 
     // Cleanup is handled by the WebSocket client itself
-  }, [setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, addWindow, removeWindow]);
+  }, [setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, setActivePane, addWindow, removeWindow]);
 }

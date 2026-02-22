@@ -3,7 +3,6 @@
  * Handles window operations: createWindow, closeWindow, switchWindow
  */
 
-import { randomUUID } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import type {
   CreateWindowMessage,
@@ -16,6 +15,8 @@ import type {
 import type { WindowWithPanes, Layout, Pane } from '@webterm/shared/models';
 import { logger } from '../../utils/logger.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { sessionService } from '../../services/session-service.js';
+import { ptyManager } from '../../services/pty-service.js';
 
 /** Session handler context */
 export interface SessionHandlerContext {
@@ -43,46 +44,39 @@ export async function handleCreateWindow(
   message: CreateWindowMessage
 ): Promise<void> {
   const { sessionId, name } = message.payload;
-  
+
   logger.debug('Creating window', { sessionId, name });
-  
+
   try {
-    // TODO: Create window through session service
-    // const window = await sessionService.createWindow(sessionId, name);
-    
-    // Create initial pane for the window
-    const paneId = randomUUID();
-    const windowId = randomUUID();
-    
-    const pane: Pane = {
-      id: paneId,
-      windowId,
-      shell: 'default',
-      cwd: null,
-      cols: 80,
-      rows: 24,
-      connectionState: 'connecting',
-      exitCode: null,
-      createdAt: Date.now(),
-    };
-    
-    const layout: Layout = { type: 'leaf', paneId };
-    
-    const window: WindowWithPanes = {
-      id: windowId,
+    // Create window via session service (persists to DB)
+    const window = sessionService.createWindow(
       sessionId,
-      name: name ?? `Window ${Date.now()}`,
-      index: 0,
-      createdAt: Date.now(),
-      layout,
-      panes: [pane],
-    };
-    
+      name ?? `Window ${Date.now()}`,
+      'default'
+    );
+
+    if (!window) {
+      sendError(ctx.ws, 'SESSION_NOT_FOUND', `Session ${sessionId} not found`);
+      return;
+    }
+
+    // Spawn PTY for the initial pane
+    const initialPane = window.panes[0];
+    if (initialPane) {
+      ptyManager.spawn(initialPane.id, {
+        shell: 'default',
+        cols: initialPane.cols,
+        rows: initialPane.rows,
+      });
+      // Update connection state
+      initialPane.connectionState = 'connected';
+    }
+
     // Update active window
-    ctx.activeWindowId = windowId;
-    
+    ctx.activeWindowId = window.id;
+
     sendWindowCreated(ctx.ws, window);
-    logger.info('Window created', { windowId, sessionId });
+    logger.info('Window created', { windowId: window.id, sessionId });
   } catch (error) {
     logger.error('Failed to create window', { sessionId, error });
     sendError(ctx.ws, 'SESSION_NOT_FOUND', `Session ${sessionId} not found`);
@@ -97,18 +91,18 @@ export async function handleCloseWindow(
   message: CloseWindowMessage
 ): Promise<void> {
   const { windowId } = message.payload;
-  
+
   logger.debug('Closing window', { windowId });
-  
+
   try {
-    // TODO: Close window through session service
-    // await sessionService.closeWindow(windowId);
-    
+    // Delete window via session service (kills PTYs and removes from DB)
+    sessionService.deleteWindow(windowId);
+
     // Clear active window if it was the closed one
     if (ctx.activeWindowId === windowId) {
       ctx.activeWindowId = null;
     }
-    
+
     sendWindowClosed(ctx.ws, windowId);
     logger.info('Window closed', { windowId });
   } catch (error) {
@@ -125,21 +119,16 @@ export async function handleSwitchWindow(
   message: SwitchWindowMessage
 ): Promise<void> {
   const { windowId } = message.payload;
-  
+
   logger.debug('Switching window', { windowId, sessionId: ctx.sessionId });
-  
+
   try {
-    // TODO: Validate window exists
-    // const window = await sessionService.getWindow(windowId);
-    
     ctx.activeWindowId = windowId;
-    
-    // TODO: Update session's active window in database
-    // await sessionService.setActiveWindow(ctx.sessionId, windowId);
-    
+
+    // Persist active window to database
+    sessionService.updateSession(ctx.sessionId, { activeWindowId: windowId });
+
     logger.info('Window switched', { windowId, sessionId: ctx.sessionId });
-    
-    // Note: Client should request window state if needed
   } catch (error) {
     logger.error('Failed to switch window', { windowId, error });
     sendError(ctx.ws, 'WINDOW_NOT_FOUND', `Window ${windowId} not found`);

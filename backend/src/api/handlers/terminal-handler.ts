@@ -16,16 +16,26 @@ import type {
   PaneClosedMessage,
   PaneExitedMessage,
   LayoutUpdatedMessage,
+  WindowClosedMessage,
   ErrorMessage,
   FlowPauseMessage,
   FlowResumeMessage,
 } from '@webterm/shared/messages';
-import type { Layout, Pane } from '@webterm/shared/models';
+import type { Layout, Pane, ShellType } from '@webterm/shared/models';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
 import { NotFoundError, PaneLimitError } from '../../utils/errors.js';
 import { ptyManager } from '../../services/pty-service.js';
+import { sessionService } from '../../services/session-service.js';
 import { encodeBinaryMessage, MessageType } from '../protocol.js';
+import {
+  splitLayout,
+  removePane as removePaneFromLayout,
+  countPanes,
+  validatePaneLimit,
+  createLeafLayout,
+  MAX_PANES_PER_WINDOW,
+} from '../../services/layout-service.js';
 
 /** Flow control watermarks in bytes */
 const HIGH_WATER_MARK = 64 * 1024; // 64KB
@@ -49,6 +59,10 @@ interface OutputBuffer {
 export interface TerminalHandlerContext {
   sessionId: string;
   ws: WebSocket;
+  /** Current window ID being operated on */
+  windowId: string | null;
+  /** Current layout tree for the active window */
+  layout: Layout | null;
   focusedPaneId: string | null;
   broadcastState: BroadcastState;
   outputBuffers: Map<string, OutputBuffer>;
@@ -61,10 +75,20 @@ export function createTerminalContext(sessionId: string, ws: WebSocket): Termina
   return {
     sessionId,
     ws,
+    windowId: null,
+    layout: null,
     focusedPaneId: null,
     broadcastState: { enabled: false, paneIds: new Set() },
     outputBuffers: new Map(),
   };
+}
+
+/**
+ * Set the window context (called when initial window is created or window is switched)
+ */
+export function setWindowContext(ctx: TerminalHandlerContext, windowId: string, layout: Layout): void {
+  ctx.windowId = windowId;
+  ctx.layout = layout;
 }
 
 /**
@@ -104,20 +128,27 @@ export async function handleCreate(
   logger.debug('Creating pane', { windowId, shell, cwd });
 
   try {
+    // Check pane limit if we have a layout
+    if (ctx.layout && !validatePaneLimit(ctx.layout)) {
+      sendError(ctx.ws, 'MAX_PANES_EXCEEDED', `Maximum of ${MAX_PANES_PER_WINDOW} panes per window`);
+      return;
+    }
+
     const paneId = randomUUID();
 
     // Spawn PTY for the pane
-    const ptyInstance = ptyManager.spawn(paneId, {
+    const spawnOpts: import('../../services/pty-service.js').PtySpawnOptions = {
       shell: shell ?? 'default',
-      cwd: cwd ?? undefined,
       cols: 80,
       rows: 24,
-    });
+    };
+    if (cwd) spawnOpts.cwd = cwd;
+    const ptyInstance = ptyManager.spawn(paneId, spawnOpts);
 
     const pane: Pane = {
       id: paneId,
-      windowId,
-      shell: ptyInstance.shell,
+      windowId: ctx.windowId ?? windowId,
+      shell: (shell ?? 'default') as ShellType,
       cwd: ptyInstance.cwd,
       cols: ptyInstance.cols,
       rows: ptyInstance.rows,
@@ -126,9 +157,28 @@ export async function handleCreate(
       createdAt: Date.now(),
     };
 
-    const layout: Layout = { type: 'leaf', paneId: pane.id };
+    // If we have an existing layout with a focused pane, split it vertically
+    // Otherwise create a leaf layout (for initial pane creation)
+    let newLayout: Layout;
+    if (ctx.layout && ctx.focusedPaneId) {
+      const split = splitLayout(ctx.layout, ctx.focusedPaneId, 'v', paneId);
+      newLayout = split ?? createLeafLayout(paneId);
+      ctx.layout = newLayout;
+    } else if (ctx.layout) {
+      // No focused pane, just create a leaf (shouldn't happen normally)
+      newLayout = createLeafLayout(paneId);
+      ctx.layout = newLayout;
+    } else {
+      newLayout = createLeafLayout(paneId);
+      ctx.layout = newLayout;
+    }
 
-    sendPaneCreated(ctx.ws, pane, layout);
+    // Persist layout to DB
+    if (ctx.windowId) {
+      sessionService.updateWindowLayout(ctx.windowId, newLayout);
+    }
+
+    sendPaneCreated(ctx.ws, pane, newLayout);
     logger.info('Pane created', { paneId: pane.id, windowId, shell: ptyInstance.shell });
   } catch (error) {
     logger.error('Failed to create pane', { windowId, error });
@@ -152,13 +202,8 @@ export async function handleClose(
   logger.debug('Closing pane', { paneId });
 
   try {
-    const success = ptyManager.kill(paneId);
-    if (!success) {
-      sendError(ctx.ws, 'PANE_NOT_FOUND', `Pane ${paneId} not found`, paneId);
-      return;
-    }
-
-    const layout: Layout = { type: 'leaf', paneId: '' };
+    // Kill the PTY
+    ptyManager.kill(paneId);
 
     // Clean up output buffer
     ctx.outputBuffers.delete(paneId);
@@ -166,7 +211,32 @@ export async function handleClose(
     // Remove from broadcast if present
     ctx.broadcastState.paneIds.delete(paneId);
 
-    sendPaneClosed(ctx.ws, paneId, layout);
+    // Update layout tree
+    let newLayout: Layout | null = null;
+    if (ctx.layout) {
+      newLayout = removePaneFromLayout(ctx.layout, paneId);
+      if (newLayout) {
+        ctx.layout = newLayout;
+      }
+    }
+
+    // If layout is null, the last pane was closed — auto-close the window
+    if (!newLayout && ctx.windowId) {
+      sessionService.deleteWindow(ctx.windowId);
+      sendWindowClosed(ctx.ws, ctx.windowId);
+      logger.info('Window auto-closed (last pane)', { windowId: ctx.windowId, paneId });
+      ctx.windowId = null;
+      ctx.layout = null;
+      return;
+    }
+
+    // Persist layout to DB
+    if (ctx.windowId && newLayout) {
+      sessionService.updateWindowLayout(ctx.windowId, newLayout);
+    }
+
+    const layoutToSend = newLayout ?? { type: 'leaf' as const, paneId: '' };
+    sendPaneClosed(ctx.ws, paneId, layoutToSend);
     logger.info('Pane closed', { paneId });
   } catch (error) {
     logger.error('Failed to close pane', { paneId, error });
@@ -182,42 +252,63 @@ export async function handleSplit(
   message: SplitMessage
 ): Promise<void> {
   const { paneId, direction, shell } = message.payload;
-  
+
   logger.debug('Splitting pane', { paneId, direction, shell });
-  
+
   try {
-    // TODO: Check pane limit
-    // TODO: Create new pane and update layout
-    // const newPane = await ptyService.createPane({ windowId, shell });
-    // const layout = await sessionService.splitPane(paneId, direction, newPane.id);
-    
-    // Placeholder response
-    const newPane: Pane = {
-      id: randomUUID(),
-      windowId: 'placeholder',
+    // Validate we have a layout context
+    if (!ctx.layout || !ctx.windowId) {
+      sendError(ctx.ws, 'NO_LAYOUT', 'No active window layout', paneId);
+      return;
+    }
+
+    // Check pane limit
+    if (!validatePaneLimit(ctx.layout)) {
+      sendError(ctx.ws, 'MAX_PANES_EXCEEDED', `Maximum of ${MAX_PANES_PER_WINDOW} panes per window`, paneId);
+      return;
+    }
+
+    const newPaneId = randomUUID();
+
+    // Spawn PTY for the new pane
+    const ptyInstance = ptyManager.spawn(newPaneId, {
       shell: shell ?? 'default',
-      cwd: null,
       cols: 80,
       rows: 24,
+    });
+
+    // Update layout tree
+    const newLayout = splitLayout(ctx.layout, paneId, direction, newPaneId);
+    if (!newLayout) {
+      // Target pane not found in layout — kill the PTY we just spawned
+      ptyManager.kill(newPaneId);
+      sendError(ctx.ws, 'PANE_NOT_FOUND', `Pane ${paneId} not found in layout`, paneId);
+      return;
+    }
+
+    // Update context with the new layout
+    ctx.layout = newLayout;
+
+    const newPane: Pane = {
+      id: newPaneId,
+      windowId: ctx.windowId,
+      shell: (shell ?? 'default') as ShellType,
+      cwd: ptyInstance.cwd,
+      cols: ptyInstance.cols,
+      rows: ptyInstance.rows,
       connectionState: 'connected',
       exitCode: null,
       createdAt: Date.now(),
     };
-    
-    const layout: Layout = {
-      type: direction === 'h' ? 'horizontal' : 'vertical',
-      children: [
-        { type: 'leaf', paneId },
-        { type: 'leaf', paneId: newPane.id },
-      ],
-      sizes: [0.5, 0.5],
-    };
-    
-    sendPaneCreated(ctx.ws, newPane, layout);
-    logger.info('Pane split', { paneId, newPaneId: newPane.id, direction });
+
+    // Persist layout to DB
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+
+    sendPaneCreated(ctx.ws, newPane, newLayout);
+    logger.info('Pane split', { paneId, newPaneId, direction, paneCount: countPanes(newLayout) });
   } catch (error) {
     logger.error('Failed to split pane', { paneId, error });
-    sendError(ctx.ws, 'PANE_NOT_FOUND', `Pane ${paneId} not found`, paneId);
+    sendError(ctx.ws, 'PTY_SPAWN_FAILED', 'Failed to split pane', paneId);
   }
 }
 
@@ -377,6 +468,14 @@ export function sendLayoutUpdated(ws: WebSocket, windowId: string, layout: Layou
   const message: LayoutUpdatedMessage = {
     type: 'layoutUpdated',
     payload: { windowId, layout },
+  };
+  sendJson(ws, message);
+}
+
+function sendWindowClosed(ws: WebSocket, windowId: string): void {
+  const message: WindowClosedMessage = {
+    type: 'windowClosed',
+    payload: { windowId },
   };
   sendJson(ws, message);
 }
