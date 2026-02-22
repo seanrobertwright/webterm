@@ -228,46 +228,53 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
 
   // Create initial window if this is a new session
   if (!isReconnect) {
-    const paneId = randomUUID();
-    const windowId = randomUUID();
+    // Use sessionService.createSession to persist to DB immediately
+    const dbSession = sessionService.createSession({ name: session.name });
 
-    // Spawn PTY for the initial pane
-    const ptyInstance = ptyManager.spawn(paneId, {
-      shell: 'default',
-      cols: 80,
-      rows: 24,
-    });
+    // The DB assigned its own IDs — update our sessionId mapping
+    // We need to re-map the client connection to the DB session ID
+    if (dbSession.id !== sessionId) {
+      serverState?.clients.delete(sessionId);
+      sessionId = dbSession.id;
+      client.sessionId = sessionId;
+      terminalCtx.sessionId = sessionId;
+      sessionCtx.sessionId = sessionId;
+      serverState?.clients.set(sessionId, client);
+      // Re-send connected with the correct session ID
+      sendConnected(ws, sessionId, {
+        id: dbSession.id,
+        name: dbSession.name,
+        createdAt: dbSession.createdAt,
+        updatedAt: dbSession.updatedAt,
+        activeWindowId: dbSession.activeWindowId,
+      });
+    }
 
-    const pane: Pane = {
-      id: paneId,
-      windowId,
-      shell: 'default',
-      cwd: ptyInstance.cwd,
-      cols: 80,
-      rows: 24,
-      connectionState: 'connected',
-      exitCode: null,
-      createdAt: Date.now(),
-    };
+    const dbWindow = dbSession.windows[0];
+    if (dbWindow) {
+      const dbPane = dbWindow.panes[0];
+      if (dbPane) {
+        // Spawn PTY for the initial pane
+        ptyManager.spawn(dbPane.id, {
+          shell: dbPane.shell,
+          cols: dbPane.cols,
+          rows: dbPane.rows,
+        });
 
-    const layout: Layout = { type: 'leaf', paneId };
+        // Update pane connection state in DB
+        sessionService.updatePaneConnectionState(dbPane.id, 'connected');
 
-    const window: WindowWithPanes = {
-      id: windowId,
-      sessionId,
-      name: 'Main',
-      index: 0,
-      createdAt: Date.now(),
-      layout,
-      panes: [pane],
-    };
+        // Update pane object for the client message
+        dbPane.connectionState = 'connected';
+      }
 
-    // Set window context on terminal handler so split/close have layout access
-    setWindowContext(terminalCtx, windowId, layout);
+      // Set window context on terminal handler so split/close have layout access
+      setWindowContext(terminalCtx, dbWindow.id, dbWindow.layout);
 
-    // Send window created message to initialize the client
-    sendWindowCreated(ws, window);
-    logger.info('Initial window created', { windowId, sessionId, paneId });
+      // Send window created message to initialize the client
+      sendWindowCreated(ws, dbWindow);
+      logger.info('Initial window created', { windowId: dbWindow.id, sessionId, paneId: dbPane?.id });
+    }
   }
 
   // If reconnecting, restore windows/layout and send buffered output
