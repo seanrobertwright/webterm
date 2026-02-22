@@ -51,7 +51,6 @@ interface ClientConnection {
   terminalCtx: TerminalHandlerContext;
   sessionCtx: SessionHandlerContext;
   isAlive: boolean;
-  lastPing: number;
 }
 
 /** Output buffer for disconnected sessions */
@@ -215,7 +214,6 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     terminalCtx,
     sessionCtx,
     isAlive: true,
-    lastPing: Date.now(),
   };
 
   serverState?.clients.set(sessionId, client);
@@ -366,7 +364,6 @@ function setupWebSocketHandlers(client: ClientConnection): void {
 
   ws.on('pong', () => {
     client.isAlive = true;
-    client.lastPing = Date.now();
   });
 
   ws.on('close', (code: number, reason: Buffer) => {
@@ -508,25 +505,16 @@ function startHeartbeat(): void {
   if (!serverState) return;
 
   serverState.heartbeatInterval = setInterval(() => {
-    const now = Date.now();
-
     serverState?.clients.forEach((client, sessionId) => {
       if (!client.isAlive) {
-        // Client didn't respond to ping, terminate
+        // Client didn't respond to the previous ping — terminate
         logger.warn('Client heartbeat timeout', { sessionId });
         client.ws.terminate();
         serverState?.clients.delete(sessionId);
         return;
       }
 
-      // Check if ping timeout exceeded
-      if (now - client.lastPing > config.wsHeartbeatTimeout) {
-        logger.warn('Client ping timeout', { sessionId });
-        client.ws.terminate();
-        serverState?.clients.delete(sessionId);
-        return;
-      }
-
+      // Mark as dead; the pong handler will set it back to true
       client.isAlive = false;
       client.ws.ping();
     });
