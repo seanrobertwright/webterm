@@ -3,7 +3,7 @@
  * Holds PTY handle and manages scrollback buffer for reconnection replay
  */
 
-import type * as pty from 'node-pty';
+import type * as pty from '@lydell/node-pty';
 
 /** Default buffer configuration */
 export const TERMINAL_BUFFER_CONFIG = {

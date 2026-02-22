@@ -16,6 +16,24 @@ import { createRestRouter } from './api/rest-router.js';
 let server: http.Server | null = null;
 
 /**
+ * Search upward for the frontend/dist directory.
+ * Works whether running from the dev build or the published package.
+ */
+function findFrontendDist(startDir: string): string | null {
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'frontend', 'dist', 'index.html');
+    if (fs.existsSync(candidate)) {
+      return path.join(dir, 'frontend', 'dist');
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
  * Start the server
  */
 async function start(): Promise<void> {
@@ -29,8 +47,11 @@ async function start(): Promise<void> {
 
   // In production, serve built frontend as static files
   const isProduction = process.env.NODE_ENV === 'production';
+  // In the published package, backend runs from backend/dist/backend/src/
+  // so frontend/dist is 4 levels up at the package root.
+  // In a dev production build, we also check the 2-level path.
   const frontendDistDir = isProduction
-    ? path.resolve(import.meta.dirname, '../../frontend/dist')
+    ? findFrontendDist(import.meta.dirname)
     : null;
 
   if (isProduction && frontendDistDir && fs.existsSync(frontendDistDir)) {

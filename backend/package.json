@@ -13,9 +13,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.1.0",
     "@webterm/shared": "*",
     "better-sqlite3": "^12.6.2",
-    "node-pty": "^1.1.0",
+    "open": "^11.0.0",
     "uuid": "^11.0.0",
     "ws": "^8.19.0"
   },

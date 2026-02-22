@@ -3,7 +3,7 @@
  * Handles node-pty lifecycle and communication
  */
 
-import * as pty from 'node-pty';
+import * as pty from '@lydell/node-pty';
 import os from 'os';
 import { getDefaultShell, resolveShellPath } from './shell-service.js';
 import { logger } from '../utils/logger.js';
@@ -128,7 +128,6 @@ export class PtyManager {
       rows,
       cwd,
       env: this.getEnvironment(env),
-      useConpty: os.platform() === 'win32', // Use ConPTY on Windows
     });
 
     // Store the instance
