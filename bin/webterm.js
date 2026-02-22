@@ -10,6 +10,7 @@ import { homedir } from 'os';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { parseArgs } from 'util';
+import updateNotifier from 'update-notifier';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +18,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgPath = join(__dirname, '..', 'package.json');
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
 const version = pkg.version;
+
+// Check for updates (non-blocking, cached — checks npm at most once per day)
+updateNotifier({ pkg, updateCheckInterval: 1000 * 60 * 60 * 24 }).notify({
+  isGlobal: true,
+});
 
 // Parse CLI arguments
 const { values } = parseArgs({

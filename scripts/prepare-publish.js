@@ -119,6 +119,7 @@ const publishPkg = {
     ws: backendPkg.dependencies['ws'],
     uuid: backendPkg.dependencies['uuid'],
     open: backendPkg.dependencies['open'],
+    'update-notifier': backendPkg.dependencies['update-notifier'],
   },
   keywords: [
     'terminal',
