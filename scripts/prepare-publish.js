@@ -39,7 +39,20 @@ function step(label) {
 // 1. Clean
 step('Cleaning publish/');
 if (existsSync(publish)) {
-  rmSync(publish, { recursive: true, force: true });
+  // Remove contents individually — the directory itself may be locked on Windows
+  try {
+    rmSync(publish, { recursive: true, force: true });
+  } catch {
+    // If the directory is locked, clear its contents instead
+    const { readdirSync } = await import('fs');
+    for (const entry of readdirSync(publish)) {
+      try {
+        rmSync(join(publish, entry), { recursive: true, force: true });
+      } catch {
+        // Skip entries that can't be removed (e.g., locked files)
+      }
+    }
+  }
 }
 mkdirSync(publish, { recursive: true });
 
@@ -88,13 +101,13 @@ const backendPkg = JSON.parse(
 );
 
 const publishPkg = {
-  name: 'webterm',
+  name: '@lrilai/webterm',
   version: rootPkg.version,
   description:
     'Web-based terminal multiplexer — run multiple terminal sessions in the browser',
   type: 'module',
   bin: {
-    webterm: './bin/webterm.js',
+    webterm: 'bin/webterm.js',
   },
   files: ['bin/', 'backend/dist/', 'frontend/dist/', 'shared/'],
   engines: {
@@ -119,7 +132,7 @@ const publishPkg = {
   license: 'MIT',
   repository: {
     type: 'git',
-    url: 'https://github.com/webterm/webterm',
+    url: 'git+https://github.com/lrilai/webterm.git',
   },
 };
 
