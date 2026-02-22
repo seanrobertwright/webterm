@@ -306,12 +306,18 @@ export class WebSocketClient {
 
   private handleJsonMessage(data: string): void {
     const message = JSON.parse(data) as ServerMessage;
-    
+
+    // Respond to server heartbeat pings immediately
+    if (message.type === 'ping') {
+      this.ws?.send(JSON.stringify({ type: 'pong' }));
+      return;
+    }
+
     // Handle connected message to store session ID
     if (message.type === 'connected') {
       this.sessionId = message.payload.sessionId;
     }
-    
+
     this.callbacks.onMessage?.(message);
   }
 

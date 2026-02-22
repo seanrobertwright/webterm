@@ -282,15 +282,13 @@ function App() {
           onSettingsClick={() => setShowSettingsPanel(true)}
           onSessionNameSave={handleSessionNameSave}
         />
-        {windows.length > 1 && (
-          <WindowTabs
-            windows={windowTabs}
-            activeWindowId={activeWindowId}
-            onTabClick={handleWindowTabClick}
-            onTabClose={handleWindowClose}
-            onNewWindow={handleNewWindow}
-          />
-        )}
+        <WindowTabs
+          windows={windowTabs}
+          activeWindowId={activeWindowId}
+          onTabClick={handleWindowTabClick}
+          {...(windows.length > 1 ? { onTabClose: handleWindowClose } : {})}
+          onNewWindow={handleNewWindow}
+        />
         <main className="flex-1 relative overflow-hidden p-2">
           <PaneContainer
             layout={layout}

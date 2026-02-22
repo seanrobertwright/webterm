@@ -97,6 +97,11 @@ export interface SwitchWindowMessage {
   };
 }
 
+/** Heartbeat pong (client response to server ping) */
+export interface PongMessage {
+  type: 'pong';
+}
+
 export type ClientMessage =
   | ResizeMessage
   | CreateMessage
@@ -106,7 +111,8 @@ export type ClientMessage =
   | BroadcastMessage
   | CreateWindowMessage
   | CloseWindowMessage
-  | SwitchWindowMessage;
+  | SwitchWindowMessage
+  | PongMessage;
 
 // ============================================================================
 // Server → Client Messages
@@ -199,6 +205,11 @@ export interface ErrorMessage {
   };
 }
 
+/** Heartbeat ping (server → client) */
+export interface PingMessage {
+  type: 'ping';
+}
+
 export type ServerMessage =
   | ConnectedMessage
   | PaneCreatedMessage
@@ -209,7 +220,8 @@ export type ServerMessage =
   | WindowClosedMessage
   | FlowPauseMessage
   | FlowResumeMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | PingMessage;
 
 // ============================================================================
 // Binary Protocol Helpers

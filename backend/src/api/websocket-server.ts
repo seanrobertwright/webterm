@@ -362,6 +362,7 @@ function setupWebSocketHandlers(client: ClientConnection): void {
     }
   });
 
+  // Also handle protocol-level pong (direct connections, not proxied)
   ws.on('pong', () => {
     client.isAlive = true;
   });
@@ -425,6 +426,16 @@ async function handleJsonMessage(
   logger.debug('Received message', { type: message.type });
 
   switch (message.type) {
+    // Heartbeat
+    case 'pong': {
+      // Find the client for this context and mark as alive
+      const client = serverState?.clients.get(terminalCtx.sessionId);
+      if (client) {
+        client.isAlive = true;
+      }
+      return;
+    }
+
     // Terminal operations
     case 'resize':
       await handleResize(terminalCtx, message);
@@ -516,7 +527,10 @@ function startHeartbeat(): void {
 
       // Mark as dead; the pong handler will set it back to true
       client.isAlive = false;
-      client.ws.ping();
+      // Send application-level ping (works through proxies like Vite dev server)
+      if (client.ws.readyState === client.ws.OPEN) {
+        client.ws.send(JSON.stringify({ type: 'ping' }));
+      }
     });
   }, config.wsHeartbeatInterval);
 
