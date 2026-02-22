@@ -3,6 +3,8 @@
  */
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
 import { config } from './config/index.js';
 import { runMigrations } from './db/migrate.js';
 import { closeDatabase } from './db/database.js';
@@ -24,7 +26,68 @@ async function start(): Promise<void> {
 
   // Create HTTP server with REST router
   const restRouter = createRestRouter();
-  server = http.createServer(restRouter);
+
+  // In production, serve built frontend as static files
+  const isProduction = process.env.NODE_ENV === 'production';
+  const frontendDistDir = isProduction
+    ? path.resolve(import.meta.dirname, '../../frontend/dist')
+    : null;
+
+  if (isProduction && frontendDistDir && fs.existsSync(frontendDistDir)) {
+    logger.info('Production mode: serving frontend from ' + frontendDistDir);
+  }
+
+  server = http.createServer((req, res) => {
+    // Try REST/API routes first
+    const url = req.url ?? '/';
+
+    // API, health, and WebSocket routes go to the REST router
+    if (url.startsWith('/api') || url.startsWith('/health') || url.startsWith('/ws')) {
+      restRouter(req, res);
+      return;
+    }
+
+    // In production, serve static frontend files
+    if (isProduction && frontendDistDir) {
+      const filePath = path.join(frontendDistDir, url === '/' ? 'index.html' : url);
+      const normalizedPath = path.resolve(filePath);
+
+      // Prevent directory traversal
+      if (!normalizedPath.startsWith(frontendDistDir)) {
+        res.statusCode = 403;
+        res.end('Forbidden');
+        return;
+      }
+
+      fs.stat(normalizedPath, (err, stats) => {
+        if (!err && stats.isFile()) {
+          const ext = path.extname(normalizedPath).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.html': 'text/html',
+            '.js': 'application/javascript',
+            '.css': 'text/css',
+            '.json': 'application/json',
+            '.png': 'image/png',
+            '.svg': 'image/svg+xml',
+            '.ico': 'image/x-icon',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+          };
+          res.setHeader('Content-Type', mimeTypes[ext] ?? 'application/octet-stream');
+          fs.createReadStream(normalizedPath).pipe(res);
+        } else {
+          // SPA fallback: serve index.html for client-side routing
+          const indexPath = path.join(frontendDistDir, 'index.html');
+          res.setHeader('Content-Type', 'text/html');
+          fs.createReadStream(indexPath).pipe(res);
+        }
+      });
+      return;
+    }
+
+    // In dev mode, non-API routes get a 404 (Vite handles frontend)
+    restRouter(req, res);
+  });
 
   // Attach WebSocket server
   createWebSocketServer(server);

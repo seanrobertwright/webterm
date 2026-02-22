@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: .
+      target: dev-backend
+    ports:
+      - target: 9174
+        published: 9174
+        protocol: tcp
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./shared/types:/app/shared/types
+      - webterm-data:/app/backend/data
+    environment:
+      - HOST=0.0.0.0
+
+  frontend:
+    build:
+      context: .
+      target: dev-frontend
+    ports:
+      - target: 5173
+        published: 5173
+        protocol: tcp
+    volumes:
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts
+      - ./shared/types:/app/shared/types
+    environment:
+      - HOST=0.0.0.0
+      - BACKEND_HOST=backend
+    depends_on:
+      - backend
+
+  webterm-prod:
+    build:
+      context: .
+      target: prod
+    ports:
+      - target: 9174
+        published: 9174
+        protocol: tcp
+    volumes:
+      - webterm-data:/app/backend/data
+    environment:
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+    profiles:
+      - prod
+
+volumes:
+  webterm-data:

@@ -64,10 +64,18 @@ export class SessionService {
    * Create a new session with an initial window and pane
    */
   createSession(options: CreateSessionOptions): SessionWithWindows {
-    const { name, shell = 'default', cwd } = options;
+    const { name: requestedName, shell = 'default', cwd } = options;
 
     const db = getDatabase();
     const now = Date.now();
+
+    // Ensure unique name — append counter if name already exists
+    let name = requestedName;
+    const existing = db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name = ?').get(name) as { count: number };
+    if (existing.count > 0) {
+      const total = db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name LIKE ?').get(`${requestedName}%`) as { count: number };
+      name = `${requestedName} ${total.count + 1}`;
+    }
 
     const sessionId = uuidv4();
     const windowId = uuidv4();
@@ -78,17 +86,20 @@ export class SessionService {
     const initialLayout = createLeafLayout(paneId);
 
     return transaction(() => {
-      // Create session
+      // Create session (without active_window_id to avoid FK cycle)
       db.prepare(`
         INSERT INTO sessions (id, name, created_at, updated_at, active_window_id)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(sessionId, name, now, now, windowId);
+        VALUES (?, ?, ?, ?, NULL)
+      `).run(sessionId, name, now, now);
 
       // Create initial window
       db.prepare(`
         INSERT INTO windows (id, session_id, name, idx, layout, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(windowId, sessionId, 'Window 1', 0, serializeLayout(initialLayout), now);
+
+      // Now set active window (window exists, FK satisfied)
+      db.prepare(`UPDATE sessions SET active_window_id = ? WHERE id = ?`).run(windowId, sessionId);
 
       // Create initial pane
       db.prepare(`
