@@ -778,6 +778,19 @@ async function handleJsonMessage(
             success: true,
           },
         });
+
+        // After successful set-option, broadcast optionChanged to the client
+        if (parseResult.value.command === 'set-option') {
+          const optName = parseResult.value.positional[0];
+          const optValue = parseResult.value.positional[1] ?? '';
+          const isUnset = parseResult.value.flags.get('u') === true;
+          if (optName && !isUnset) {
+            sendJson(terminalCtx.ws, {
+              type: 'optionChanged',
+              payload: { name: optName, value: optValue, scope: 'session' },
+            });
+          }
+        }
       } else {
         sendJson(terminalCtx.ws, {
           type: 'commandError',
