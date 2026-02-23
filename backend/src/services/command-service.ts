@@ -13,9 +13,18 @@ import { logger } from '../utils/logger.js';
 import { sessionService } from './session-service.js';
 import { optionService } from './option-service.js';
 import { pasteBufferService } from './paste-buffer-service.js';
+import { keybindingService } from './keybinding-service.js';
 import { ptyManager } from './pty-service.js';
+import {
+  extractPane,
+  findAdjacentPane,
+  getPaneIds,
+  insertPaneIntoLayout,
+  rotatePaneIds,
+  swapPanesInLayout,
+} from './layout-service.js';
 import type { ParsedCommand } from '../../../shared/tmux/command-registry.js';
-import type { OptionScope } from '../../../shared/types/models.js';
+import type { OptionScope, SplitDirection } from '../../../shared/types/models.js';
 
 // ============================================================================
 // Types
@@ -69,7 +78,7 @@ export class CommandService {
         case 'rename-window':
           return this.stubSuccess();
         case 'select-window':
-          return this.stubSuccess();
+          return this.handleSelectWindow(parsed, ctx);
         case 'last-window':
           return this.stubSuccess();
         case 'next-window':
@@ -91,21 +100,21 @@ export class CommandService {
         case 'kill-pane':
           return this.stubSuccess();
         case 'select-pane':
-          return this.stubSuccess();
+          return this.handleSelectPane(parsed, ctx);
         case 'swap-pane':
-          return this.stubSuccess();
+          return this.handleSwapPane(parsed, ctx);
         case 'break-pane':
-          return this.stubSuccess();
+          return this.handleBreakPane(parsed, ctx);
         case 'join-pane':
-          return this.stubSuccess();
+          return this.handleJoinPane(parsed, ctx);
         case 'resize-pane':
           return this.stubSuccess();
         case 'rotate-window':
-          return this.stubSuccess();
+          return this.handleRotateWindow(parsed, ctx);
         case 'display-panes':
-          return this.stubSuccess();
+          return this.handleDisplayPanes(ctx);
         case 'respawn-pane':
-          return this.stubSuccess();
+          return this.handleRespawnPane(parsed, ctx);
 
         // ================================================================
         // Layout commands
@@ -121,11 +130,11 @@ export class CommandService {
         // Key binding commands
         // ================================================================
         case 'bind-key':
-          return this.stubSuccess();
+          return this.handleBindKey(parsed);
         case 'unbind-key':
-          return this.stubSuccess();
+          return this.handleUnbindKey(parsed);
         case 'list-keys':
-          return this.handleListKeys();
+          return this.handleListKeys(parsed);
 
         // ================================================================
         // Option commands
@@ -165,7 +174,7 @@ export class CommandService {
         case 'clock-mode':
           return this.stubSuccess();
         case 'capture-pane':
-          return this.stubSuccess();
+          return this.handleCapturePane(parsed, ctx);
 
         // ================================================================
         // Interactive mode commands
@@ -296,10 +305,82 @@ export class CommandService {
   }
 
   /**
-   * list-keys: Placeholder for key binding list.
+   * bind-key: Bind a key to a command.
+   *
+   * Flags: -T (key table, default "prefix"), -n (shorthand for -T root)
+   * Positional: key, command [args...]
    */
-  private handleListKeys(): CommandResult {
-    return { output: 'Key bindings will be listed here', success: true };
+  private handleBindKey(parsed: ParsedCommand): CommandResult {
+    const isRoot = parsed.flags.get('n') === true;
+    const tableFlag = parsed.flags.get('T');
+    const keyTable = isRoot
+      ? 'root'
+      : typeof tableFlag === 'string'
+        ? tableFlag
+        : 'prefix';
+
+    const key = parsed.positional[0];
+    if (key === undefined) {
+      return { output: 'Missing key argument', success: false };
+    }
+
+    const commandParts = parsed.positional.slice(1);
+    if (commandParts.length === 0) {
+      return { output: 'Missing command argument', success: false };
+    }
+
+    const command = commandParts.join(' ');
+    keybindingService.bind(keyTable, key, command);
+    return { output: '', success: true };
+  }
+
+  /**
+   * unbind-key: Remove a key binding.
+   *
+   * Flags: -T (key table, default "prefix"), -n (shorthand for -T root), -a (unbind all)
+   * Positional: key
+   */
+  private handleUnbindKey(parsed: ParsedCommand): CommandResult {
+    const unbindAll = parsed.flags.get('a') === true;
+    if (unbindAll) {
+      keybindingService.reset();
+      return { output: '', success: true };
+    }
+
+    const isRoot = parsed.flags.get('n') === true;
+    const tableFlag = parsed.flags.get('T');
+    const keyTable = isRoot
+      ? 'root'
+      : typeof tableFlag === 'string'
+        ? tableFlag
+        : 'prefix';
+
+    const key = parsed.positional[0];
+    if (key === undefined) {
+      return { output: 'Missing key argument', success: false };
+    }
+
+    keybindingService.unbind(keyTable, key);
+    return { output: '', success: true };
+  }
+
+  /**
+   * list-keys: List all key bindings, optionally filtered by table.
+   *
+   * Flags: -T (key table to filter)
+   */
+  private handleListKeys(parsed: ParsedCommand): CommandResult {
+    const tableFlag = parsed.flags.get('T');
+    const bindings = typeof tableFlag === 'string'
+      ? keybindingService.getByTable(tableFlag)
+      : keybindingService.getAll();
+
+    if (bindings.length === 0) {
+      return { output: 'No key bindings.', success: true };
+    }
+
+    const lines = bindings.map((b) => `bind-key -T ${b.keyTable} ${b.key} ${b.command}`);
+    return { output: lines.join('\n'), success: true };
   }
 
   /**
@@ -398,6 +479,412 @@ export class CommandService {
     }
 
     return { output: '', success: true };
+  }
+
+  // ==========================================================================
+  // Window operation handlers
+  // ==========================================================================
+
+  /**
+   * select-window: Select a window by index using -t :N notation.
+   *
+   * Flags: -t (target window, e.g. ":0", ":1", ":2")
+   * Returns: the selected window's ID as output
+   */
+  private handleSelectWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Missing target window (-t flag)', success: false };
+    }
+
+    // Parse :N notation to extract window index
+    const match = /^:(\d+)$/.exec(targetFlag);
+    if (!match) {
+      return { output: `Invalid target format: ${targetFlag} (expected :N)`, success: false };
+    }
+
+    const windowIndex = parseInt(match[1]!, 10);
+
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    const targetWindow = session.windows.find((w) => w.index === windowIndex);
+    if (!targetWindow) {
+      return { output: `No window at index ${windowIndex}`, success: false };
+    }
+
+    return { output: targetWindow.id, success: true };
+  }
+
+  // ==========================================================================
+  // Pane operation handlers
+  // ==========================================================================
+
+  /**
+   * swap-pane: Swap two panes in the layout tree.
+   *
+   * Flags: -D (swap with next pane in tree order), -U (swap with previous),
+   *        -s (source pane), -t (target pane)
+   */
+  private handleSwapPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const swapDown = parsed.flags.get('D') === true;
+    const swapUp = parsed.flags.get('U') === true;
+    const sourceFlag = parsed.flags.get('s');
+    const targetFlag = parsed.flags.get('t');
+
+    const sourcePaneId = typeof sourceFlag === 'string' ? sourceFlag : ctx.paneId;
+
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    let targetPaneId: string | undefined;
+
+    if (typeof targetFlag === 'string') {
+      targetPaneId = targetFlag;
+    } else if (swapDown || swapUp) {
+      // Find next/previous pane in tree order
+      const paneIds = getPaneIds(window.layout);
+      const currentIndex = paneIds.indexOf(sourcePaneId);
+      if (currentIndex === -1) {
+        return { output: 'Pane not found in layout', success: false };
+      }
+
+      if (swapDown) {
+        // Next pane (wraps around)
+        const nextIndex = (currentIndex + 1) % paneIds.length;
+        targetPaneId = paneIds[nextIndex];
+      } else {
+        // Previous pane (wraps around)
+        const prevIndex = (currentIndex - 1 + paneIds.length) % paneIds.length;
+        targetPaneId = paneIds[prevIndex];
+      }
+    }
+
+    if (!targetPaneId) {
+      return { output: 'No target pane specified', success: false };
+    }
+
+    if (sourcePaneId === targetPaneId) {
+      return { output: '', success: true };
+    }
+
+    const newLayout = swapPanesInLayout(window.layout, sourcePaneId, targetPaneId);
+    if (!newLayout) {
+      return { output: 'Failed to swap panes: pane not found in layout', success: false };
+    }
+
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+    return { output: '', success: true };
+  }
+
+  /**
+   * break-pane: Remove a pane from the current window and create a new window
+   * containing only that pane.
+   *
+   * Flags: -t (target pane), -n (new window name)
+   */
+  private handleBreakPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const nameFlag = parsed.flags.get('n');
+    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const windowName = typeof nameFlag === 'string' ? nameFlag : 'Window';
+
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const paneIds = getPaneIds(window.layout);
+    if (paneIds.length <= 1) {
+      return { output: 'Cannot break the only pane in a window', success: false };
+    }
+
+    // Extract the pane from the current layout
+    const result = extractPane(window.layout, paneId);
+    if (!result.extracted) {
+      return { output: 'Pane not found in layout', success: false };
+    }
+
+    if (!result.remainingLayout) {
+      return { output: 'Cannot break pane: would leave empty layout', success: false };
+    }
+
+    // Update the current window's layout (pane removed)
+    sessionService.updateWindowLayout(ctx.windowId, result.remainingLayout);
+
+    // Create a new window in the same session for the broken-out pane
+    const newWindow = sessionService.createWindow(ctx.sessionId, windowName);
+    if (!newWindow) {
+      return {
+        output: 'Failed to create new window for broken-out pane',
+        success: false,
+      };
+    }
+
+    // The new window was created with its own default pane. We need to:
+    // 1. Delete the auto-created pane
+    // 2. Move our pane to the new window
+    // 3. Update the new window's layout to reference our pane
+    const autoCreatedPane = newWindow.panes[0];
+    if (autoCreatedPane) {
+      sessionService.deletePane(autoCreatedPane.id);
+    }
+
+    sessionService.movePaneToWindow(paneId, newWindow.id);
+
+    const leafLayout = { type: 'leaf' as const, paneId };
+    sessionService.updateWindowLayout(newWindow.id, leafLayout);
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * join-pane: Move a pane from its current location into the target pane's
+   * window as a split.
+   *
+   * Flags: -s (source pane), -t (target pane), -h (horizontal), -v (vertical)
+   */
+  private handleJoinPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const sourceFlag = parsed.flags.get('s');
+    const targetFlag = parsed.flags.get('t');
+    const isHorizontal = parsed.flags.get('h') === true;
+
+    const sourcePaneId = typeof sourceFlag === 'string' ? sourceFlag : ctx.paneId;
+
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Target pane (-t) is required for join-pane', success: false };
+    }
+
+    const targetPaneId = targetFlag;
+
+    if (sourcePaneId === targetPaneId) {
+      return { output: 'Source and target pane are the same', success: false };
+    }
+
+    // Find which window the source pane belongs to
+    const sourcePane = sessionService.getPane(sourcePaneId);
+    if (!sourcePane) {
+      return { output: `Source pane not found: ${sourcePaneId}`, success: false };
+    }
+
+    // Find which window the target pane belongs to
+    const targetPane = sessionService.getPane(targetPaneId);
+    if (!targetPane) {
+      return { output: `Target pane not found: ${targetPaneId}`, success: false };
+    }
+
+    const sourceWindow = sessionService.getWindow(sourcePane.windowId);
+    if (!sourceWindow) {
+      return { output: 'Source window not found', success: false };
+    }
+
+    const targetWindow = sessionService.getWindow(targetPane.windowId);
+    if (!targetWindow) {
+      return { output: 'Target window not found', success: false };
+    }
+
+    // Extract the source pane from its current layout
+    const extractResult = extractPane(sourceWindow.layout, sourcePaneId);
+    if (!extractResult.extracted) {
+      return { output: 'Source pane not found in layout', success: false };
+    }
+
+    // Update source window's layout (or delete the window if it's now empty)
+    if (extractResult.remainingLayout) {
+      sessionService.updateWindowLayout(sourceWindow.id, extractResult.remainingLayout);
+    } else {
+      // Source window is now empty (had only one pane), delete it
+      sessionService.deleteWindow(sourceWindow.id);
+    }
+
+    // Insert the pane into the target window's layout
+    const direction: SplitDirection = isHorizontal ? 'h' : 'v';
+    const newLayout = insertPaneIntoLayout(
+      targetWindow.layout,
+      targetPaneId,
+      sourcePaneId,
+      direction,
+    );
+
+    if (!newLayout) {
+      return { output: 'Failed to insert pane into target layout', success: false };
+    }
+
+    // Move the pane DB record to the target window
+    sessionService.movePaneToWindow(sourcePaneId, targetWindow.id);
+
+    // Update the target window's layout
+    sessionService.updateWindowLayout(targetWindow.id, newLayout);
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * rotate-window: Rotate pane IDs within the layout tree.
+   *
+   * Flags: -D (forward rotation, default), -U (reverse rotation)
+   */
+  private handleRotateWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const reverse = parsed.flags.get('U') === true;
+
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const newLayout = rotatePaneIds(window.layout, reverse);
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * select-pane: Select a pane by direction or mark/unmark it.
+   *
+   * Flags: -t (target pane), -L (left), -R (right), -U (up), -D (down),
+   *        -m (mark), -M (unmark)
+   */
+  private handleSelectPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const goLeft = parsed.flags.get('L') === true;
+    const goRight = parsed.flags.get('R') === true;
+    const goUp = parsed.flags.get('U') === true;
+    const goDown = parsed.flags.get('D') === true;
+    const markPane = parsed.flags.get('m') === true;
+    const unmarkPane = parsed.flags.get('M') === true;
+
+    // Handle mark/unmark on the current pane (or target)
+    const targetPaneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+
+    if (markPane) {
+      sessionService.updatePaneMarked(targetPaneId, true);
+      return { output: '', success: true };
+    }
+
+    if (unmarkPane) {
+      sessionService.updatePaneMarked(targetPaneId, false);
+      return { output: '', success: true };
+    }
+
+    // If a direct target was provided, select it
+    if (typeof targetFlag === 'string') {
+      // Verify pane exists
+      const pane = sessionService.getPane(targetFlag);
+      if (!pane) {
+        return { output: `Pane not found: ${targetFlag}`, success: false };
+      }
+      return { output: targetFlag, success: true };
+    }
+
+    // Direction-based selection
+    const hasDirection = goLeft || goRight || goUp || goDown;
+    if (!hasDirection) {
+      // No direction or target: just return the current pane
+      return { output: ctx.paneId, success: true };
+    }
+
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const direction = goLeft ? 'left' : goRight ? 'right' : goUp ? 'up' : 'down';
+    const adjacentPaneId = findAdjacentPane(window.layout, ctx.paneId, direction);
+
+    if (!adjacentPaneId) {
+      return { output: `No pane ${direction} of current pane`, success: false };
+    }
+
+    return { output: adjacentPaneId, success: true };
+  }
+
+  /**
+   * respawn-pane: Kill the existing PTY process and spawn a new shell
+   * in the same pane.
+   *
+   * Flags: -t (target pane), -k (kill existing process first)
+   */
+  private handleRespawnPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const killExisting = parsed.flags.get('k') === true;
+
+    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+
+    const pane = sessionService.getPane(paneId);
+    if (!pane) {
+      return { output: `Pane not found: ${paneId}`, success: false };
+    }
+
+    const hasPty = ptyManager.hasPty(paneId);
+
+    if (hasPty && !killExisting) {
+      return {
+        output: 'Pane still has an active process; use -k to kill it first',
+        success: false,
+      };
+    }
+
+    // Kill the existing PTY if present
+    if (hasPty) {
+      ptyManager.kill(paneId);
+    }
+
+    // Spawn a new PTY in the same pane with its existing settings
+    const spawnOptions: { shell: typeof pane.shell; cwd?: string; cols: number; rows: number } = {
+      shell: pane.shell,
+      cols: pane.cols,
+      rows: pane.rows,
+    };
+    if (pane.cwd !== null) {
+      spawnOptions.cwd = pane.cwd;
+    }
+    ptyManager.spawn(paneId, spawnOptions);
+
+    sessionService.updatePaneConnectionState(paneId, 'connected');
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * capture-pane: Capture visible pane content.
+   *
+   * This returns a special output prefix "__CAPTURE__:" that the WebSocket
+   * handler uses to signal the client to read its terminal buffer and send
+   * the content back to the paste buffer service.
+   *
+   * Flags: -t (target pane), -p (start line), -b (buffer name)
+   */
+  private handleCapturePane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const bufferFlag = parsed.flags.get('b');
+    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const bufferName = typeof bufferFlag === 'string' ? bufferFlag : undefined;
+
+    // Signal the WebSocket handler to request capture from the client
+    const meta = bufferName ? `${paneId}:${bufferName}` : paneId;
+    return { output: `__CAPTURE__:${meta}`, success: true };
+  }
+
+  /**
+   * display-panes: Show pane indices as overlays.
+   *
+   * Returns pane index data as JSON for the client to render.
+   */
+  private handleDisplayPanes(ctx: CommandContext): CommandResult {
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const paneIds = getPaneIds(window.layout);
+    const panes = paneIds.map((id, index) => ({ id, index }));
+
+    return { output: `__DISPLAY_PANES__:${JSON.stringify(panes)}`, success: true };
   }
 
   // ==========================================================================
