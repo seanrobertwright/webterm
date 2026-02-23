@@ -3,7 +3,15 @@
  * Binary messages for I/O, JSON messages for control
  */
 
-import type { Layout, Pane, Session, ShellType, SplitDirection, WindowWithPanes } from './models.ts';
+import type {
+  Layout,
+  Pane,
+  PresetLayoutName,
+  Session,
+  ShellType,
+  SplitDirection,
+  WindowWithPanes,
+} from './models.ts';
 
 /** Binary message type codes */
 export const BinaryMessageType = {
@@ -102,6 +110,140 @@ export interface PongMessage {
   type: 'pong';
 }
 
+// ============================================================================
+// New Client → Server Messages (tmux compatibility)
+// ============================================================================
+
+/** Execute a tmux command string */
+export interface ExecuteCommandMessage {
+  type: 'executeCommand';
+  payload: {
+    command: string;
+  };
+}
+
+/** Swap two panes in the layout */
+export interface SwapPaneMessage {
+  type: 'swapPane';
+  payload: {
+    sourcePaneId: string;
+    targetPaneId: string;
+  };
+}
+
+/** Extract a pane into a new window */
+export interface BreakPaneMessage {
+  type: 'breakPane';
+  payload: {
+    paneId: string;
+    windowName?: string;
+  };
+}
+
+/** Move a pane into another window */
+export interface JoinPaneMessage {
+  type: 'joinPane';
+  payload: {
+    sourcePaneId: string;
+    targetPaneId: string;
+    direction: SplitDirection;
+  };
+}
+
+/** Rotate pane positions within a window */
+export interface RotateWindowMessage {
+  type: 'rotateWindow';
+  payload: {
+    windowId: string;
+    direction: 'forward' | 'backward';
+  };
+}
+
+/** Rename a window */
+export interface RenameWindowMessage {
+  type: 'renameWindow';
+  payload: {
+    windowId: string;
+    name: string;
+  };
+}
+
+/** Apply a preset layout */
+export interface SelectLayoutMessage {
+  type: 'selectLayout';
+  payload: {
+    windowId: string;
+    layoutName: PresetLayoutName | 'next';
+  };
+}
+
+/** Detach from the current session */
+export interface DetachSessionMessage {
+  type: 'detachSession';
+}
+
+/** Switch to a different session */
+export interface SwitchSessionMessage {
+  type: 'switchSession';
+  payload: {
+    sessionId: string;
+  };
+}
+
+/** Capture pane content to a paste buffer */
+export interface CapturePaneMessage {
+  type: 'capturePane';
+  payload: {
+    paneId: string;
+    startLine?: number;
+    endLine?: number;
+    bufferName?: string;
+  };
+}
+
+/** Respawn a process in a pane */
+export interface RespawnPaneMessage {
+  type: 'respawnPane';
+  payload: {
+    paneId: string;
+    shell?: ShellType;
+  };
+}
+
+/** Request choose-tree data */
+export interface RequestChooseTreeMessage {
+  type: 'requestChooseTree';
+  payload: {
+    startAt: 'sessions' | 'windows';
+  };
+}
+
+/** Request display-panes overlay data */
+export interface RequestDisplayPanesMessage {
+  type: 'requestDisplayPanes';
+  payload: {
+    windowId: string;
+  };
+}
+
+/** Set a per-client flag */
+export interface SetClientFlagMessage {
+  type: 'setClientFlag';
+  payload: {
+    flag: 'readOnly';
+    value: boolean;
+  };
+}
+
+/** Yank (copy) text into a server-side paste buffer */
+export interface YankToBufferMessage {
+  type: 'yankToBuffer';
+  payload: {
+    content: string;
+    bufferName?: string;
+  };
+}
+
 export type ClientMessage =
   | ResizeMessage
   | CreateMessage
@@ -112,7 +254,22 @@ export type ClientMessage =
   | CreateWindowMessage
   | CloseWindowMessage
   | SwitchWindowMessage
-  | PongMessage;
+  | PongMessage
+  | ExecuteCommandMessage
+  | SwapPaneMessage
+  | BreakPaneMessage
+  | JoinPaneMessage
+  | RotateWindowMessage
+  | RenameWindowMessage
+  | SelectLayoutMessage
+  | DetachSessionMessage
+  | SwitchSessionMessage
+  | CapturePaneMessage
+  | RespawnPaneMessage
+  | RequestChooseTreeMessage
+  | RequestDisplayPanesMessage
+  | SetClientFlagMessage
+  | YankToBufferMessage;
 
 // ============================================================================
 // Server → Client Messages
@@ -210,6 +367,155 @@ export interface PingMessage {
   type: 'ping';
 }
 
+// ============================================================================
+// New Server → Client Messages (tmux compatibility)
+// ============================================================================
+
+/** Command execution result */
+export interface CommandResultMessage {
+  type: 'commandResult';
+  payload: {
+    output: string;
+    success: boolean;
+  };
+}
+
+/** Command execution error */
+export interface CommandErrorMessage {
+  type: 'commandError';
+  payload: {
+    message: string;
+    command: string;
+  };
+}
+
+/** Pane title changed (foreground process) */
+export interface PaneTitleChangedMessage {
+  type: 'paneTitleChanged';
+  payload: {
+    paneId: string;
+    title: string;
+  };
+}
+
+/** Status bar window info */
+export interface StatusBarWindow {
+  id: string;
+  index: number;
+  name: string;
+  active: boolean;
+  lastActive: boolean;
+  activityFlag: boolean;
+  bellFlag: boolean;
+  silenceFlag: boolean;
+  zoomedFlag: boolean;
+}
+
+/** Status bar content update */
+export interface StatusBarUpdateMessage {
+  type: 'statusBarUpdate';
+  payload: {
+    left: string;
+    center: string;
+    right: string;
+    windows: StatusBarWindow[];
+  };
+}
+
+/** Activity/bell/silence monitoring alert */
+export interface ActivityAlertMessage {
+  type: 'activityAlert';
+  payload: {
+    windowId: string;
+    alertType: 'activity' | 'bell' | 'silence';
+    message: string;
+  };
+}
+
+/** Display-panes overlay data */
+export interface DisplayPanesDataMessage {
+  type: 'displayPanesData';
+  payload: {
+    panes: Array<{
+      paneId: string;
+      index: number;
+      isActive: boolean;
+    }>;
+    duration: number;
+  };
+}
+
+/** Choose-tree session/window/pane data */
+export interface ChooseTreeDataMessage {
+  type: 'chooseTreeData';
+  payload: {
+    sessions: Array<{
+      id: string;
+      name: string;
+      attached: number;
+      windows: Array<{
+        id: string;
+        index: number;
+        name: string;
+        active: boolean;
+        panes: Array<{
+          id: string;
+          index: number;
+          active: boolean;
+          title: string;
+          currentCommand: string | null;
+          size: string;
+        }>;
+      }>;
+    }>;
+  };
+}
+
+/** Session switch confirmation */
+export interface SessionSwitchedMessage {
+  type: 'sessionSwitched';
+  payload: {
+    sessionId: string;
+    session: Session;
+  };
+}
+
+/** Session detach confirmation */
+export interface SessionDetachedMessage {
+  type: 'sessionDetached';
+  payload: {
+    sessionId: string;
+    reason: string;
+  };
+}
+
+/** Option value changed */
+export interface OptionChangedMessage {
+  type: 'optionChanged';
+  payload: {
+    name: string;
+    value: string;
+    scope: string;
+  };
+}
+
+/** Window renamed */
+export interface WindowRenamedMessage {
+  type: 'windowRenamed';
+  payload: {
+    windowId: string;
+    name: string;
+  };
+}
+
+/** Paste buffer content sent to client (for writing to active pane) */
+export interface PasteFromBufferMessage {
+  type: 'pasteFromBuffer';
+  payload: {
+    content: string;
+  };
+}
+
 export type ServerMessage =
   | ConnectedMessage
   | PaneCreatedMessage
@@ -221,7 +527,19 @@ export type ServerMessage =
   | FlowPauseMessage
   | FlowResumeMessage
   | ErrorMessage
-  | PingMessage;
+  | PingMessage
+  | CommandResultMessage
+  | CommandErrorMessage
+  | PaneTitleChangedMessage
+  | StatusBarUpdateMessage
+  | ActivityAlertMessage
+  | DisplayPanesDataMessage
+  | ChooseTreeDataMessage
+  | SessionSwitchedMessage
+  | SessionDetachedMessage
+  | OptionChangedMessage
+  | WindowRenamedMessage
+  | PasteFromBufferMessage;
 
 // ============================================================================
 // Binary Protocol Helpers
