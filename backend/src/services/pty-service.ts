@@ -38,6 +38,8 @@ export interface PtyInstance {
 export interface PtyEventHandlers {
   onData?: (paneId: string, data: string) => void;
   onExit?: (paneId: string, exitCode: number, signal?: number) => void;
+  onTitleChange?: (paneId: string, title: string) => void;
+  onBell?: (paneId: string) => void;
 }
 
 /** Default terminal dimensions */
@@ -145,6 +147,23 @@ export class PtyManager {
 
     // Set up event handlers
     ptyProcess.onData((data) => {
+      // Detect OSC 0/2 title sequences: \x1b]0;title\x07 or \x1b]2;title\x07
+      if (this.eventHandlers.onTitleChange) {
+        const oscMatch = /\x1b\](?:0|2);([^\x07]*)\x07/.exec(data);
+        if (oscMatch && oscMatch[1] !== undefined) {
+          this.eventHandlers.onTitleChange(paneId, oscMatch[1]);
+        }
+      }
+
+      // Detect standalone BEL characters (not part of OSC sequences)
+      if (this.eventHandlers.onBell) {
+        // Strip all OSC sequences (ESC ] ... BEL or ESC ] ... ST) first
+        const stripped = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+        if (stripped.includes('\x07')) {
+          this.eventHandlers.onBell(paneId);
+        }
+      }
+
       if (this.eventHandlers.onData) {
         this.eventHandlers.onData(paneId, data);
       }

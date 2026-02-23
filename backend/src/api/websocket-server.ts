@@ -74,6 +74,124 @@ interface WebSocketServerState {
 
 let serverState: WebSocketServerState | null = null;
 
+/** Per-window silence timers — fires when no PTY output for monitorSilence seconds */
+const silenceTimers: Map<string, NodeJS.Timeout> = new Map();
+
+/** In-memory window monitoring flags (transient, cleared on window switch) */
+const windowFlags: Map<string, { activity: boolean; bell: boolean; silence: boolean }> = new Map();
+
+/**
+ * Get or create the flags entry for a window
+ */
+function getWindowFlags(windowId: string): { activity: boolean; bell: boolean; silence: boolean } {
+  let flags = windowFlags.get(windowId);
+  if (!flags) {
+    flags = { activity: false, bell: false, silence: false };
+    windowFlags.set(windowId, flags);
+  }
+  return flags;
+}
+
+/**
+ * Clear monitoring flags for a window (called when user switches to it)
+ */
+export function clearWindowFlags(windowId: string): void {
+  const flags = windowFlags.get(windowId);
+  if (flags) {
+    flags.activity = false;
+    flags.bell = false;
+    flags.silence = false;
+  }
+}
+
+/**
+ * Send an activity/bell/silence alert to the client
+ */
+function sendActivityAlert(
+  ws: WebSocket,
+  windowId: string,
+  alertType: 'activity' | 'bell' | 'silence',
+  message: string
+): void {
+  sendJson(ws, {
+    type: 'activityAlert',
+    payload: { windowId, alertType, message },
+  });
+}
+
+/**
+ * Check if a pane's window is the active window for its session
+ * Returns { windowId, sessionId, isActive, window } or null if pane/window not found
+ */
+function getPaneWindowContext(paneId: string): {
+  windowId: string;
+  sessionId: string;
+  isActive: boolean;
+  windowName: string;
+  monitorActivity: boolean;
+  monitorSilence: number;
+  monitorBell: boolean;
+} | null {
+  const pane = sessionService.getPane(paneId);
+  if (!pane) return null;
+
+  const window = sessionService.getWindow(pane.windowId);
+  if (!window) return null;
+
+  const session = sessionService.getSession(window.sessionId);
+  if (!session) return null;
+
+  return {
+    windowId: window.id,
+    sessionId: session.id,
+    isActive: session.activeWindowId === window.id,
+    windowName: window.name,
+    monitorActivity: window.monitorActivity,
+    monitorSilence: window.monitorSilence,
+    monitorBell: window.monitorBell,
+  };
+}
+
+/**
+ * Reset or start the silence timer for a window.
+ * When the timer fires (no output for monitorSilence seconds), sends a silence alert.
+ */
+function resetSilenceTimer(ws: WebSocket, windowId: string, windowName: string, silenceSeconds: number): void {
+  // Clear existing timer
+  const existing = silenceTimers.get(windowId);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  if (silenceSeconds <= 0) {
+    silenceTimers.delete(windowId);
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    silenceTimers.delete(windowId);
+    const flags = getWindowFlags(windowId);
+    if (!flags.silence) {
+      flags.silence = true;
+      // Find the client for this window's session
+      const win = sessionService.getWindow(windowId);
+      if (win) {
+        const client = serverState?.clients.get(win.sessionId);
+        if (client && client.ws.readyState === client.ws.OPEN) {
+          sendActivityAlert(
+            client.ws,
+            windowId,
+            'silence',
+            `Silence in window '${windowName}' (${String(silenceSeconds)}s)`
+          );
+        }
+      }
+    }
+  }, silenceSeconds * 1000);
+
+  silenceTimers.set(windowId, timer);
+}
+
 /**
  * Create and attach WebSocket server to HTTP server
  */
@@ -199,6 +317,31 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         const message = encodeBinaryMessage(MessageType.OUTPUT, paneId, new Uint8Array(outputBuffer));
         ws.send(message);
       }
+
+      // Activity and silence monitoring
+      const ctx = getPaneWindowContext(paneId);
+      if (ctx) {
+        // Reset silence timer whenever output is received (regardless of active window)
+        if (ctx.monitorSilence > 0) {
+          resetSilenceTimer(ws, ctx.windowId, ctx.windowName, ctx.monitorSilence);
+        }
+
+        // Activity monitoring: only alert for non-active windows
+        if (!ctx.isActive && ctx.monitorActivity) {
+          const flags = getWindowFlags(ctx.windowId);
+          if (!flags.activity) {
+            flags.activity = true;
+            if (ws.readyState === ws.OPEN) {
+              sendActivityAlert(
+                ws,
+                ctx.windowId,
+                'activity',
+                `Activity in window '${ctx.windowName}'`
+              );
+            }
+          }
+        }
+      }
     },
     onExit: (paneId, exitCode) => {
       // Send pane exited message
@@ -233,6 +376,24 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
               type: 'windowRenamed',
               payload: { windowId: window.id, name: title },
             }));
+          }
+        }
+      }
+    },
+    onBell: (paneId) => {
+      // Bell monitoring: alert for non-active windows with monitorBell enabled
+      const ctx = getPaneWindowContext(paneId);
+      if (ctx && !ctx.isActive && ctx.monitorBell) {
+        const flags = getWindowFlags(ctx.windowId);
+        if (!flags.bell) {
+          flags.bell = true;
+          if (ws.readyState === ws.OPEN) {
+            sendActivityAlert(
+              ws,
+              ctx.windowId,
+              'bell',
+              `Bell in window '${ctx.windowName}'`
+            );
           }
         }
       }
@@ -494,10 +655,21 @@ async function handleJsonMessage(
     case 'createWindow':
       await handleCreateWindow(sessionCtx, message);
       break;
-    case 'closeWindow':
+    case 'closeWindow': {
+      // Clean up silence timer and flags for the closed window
+      const closingWindowId = message.payload.windowId;
+      const existingTimer = silenceTimers.get(closingWindowId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        silenceTimers.delete(closingWindowId);
+      }
+      windowFlags.delete(closingWindowId);
       await handleCloseWindow(sessionCtx, message);
       break;
+    }
     case 'switchWindow':
+      // Clear monitoring flags for the window being switched to
+      clearWindowFlags(message.payload.windowId);
       await handleSwitchWindow(sessionCtx, message);
       break;
 
@@ -854,6 +1026,13 @@ export function getConnectedSessions(): string[] {
 export function closeWebSocketServer(): Promise<void> {
   return new Promise((resolve) => {
     stopHeartbeat();
+
+    // Clean up all silence timers
+    for (const timer of silenceTimers.values()) {
+      clearTimeout(timer);
+    }
+    silenceTimers.clear();
+    windowFlags.clear();
 
     if (serverState?.wss) {
       // Close all connections
