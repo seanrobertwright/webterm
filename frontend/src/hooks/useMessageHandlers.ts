@@ -151,6 +151,15 @@ export function useMessageHandlers(): void {
           break;
         }
 
+        case 'optionChanged': {
+          const { name, value } = message.payload;
+          // Dispatch as a custom event so stores/components can react
+          window.dispatchEvent(
+            new CustomEvent('webterm:optionChanged', { detail: { name, value } }),
+          );
+          break;
+        }
+
         case 'activityAlert': {
           const { windowId, alertType } = message.payload;
           const flagUpdate: Partial<Record<string, boolean>> = {};
