@@ -15,6 +15,7 @@ import { sessionService } from './session-service.js';
 import { optionService } from './option-service.js';
 import { pasteBufferService } from './paste-buffer-service.js';
 import { keybindingService } from './keybinding-service.js';
+import { hookService } from './hook-service.js';
 import { ptyManager } from './pty-service.js';
 import {
   applyPresetLayout,
@@ -1281,6 +1282,50 @@ export class CommandService {
     windowLayoutIndex.set(ctx.windowId, prevIndex);
 
     return { output: '', success: true };
+  }
+
+  // ==========================================================================
+  // Hook handlers
+  // ==========================================================================
+
+  /**
+   * set-hook: Register or unregister an event hook.
+   *
+   * Flags: -u (unregister all hooks for the event)
+   * Positional: event name, command (required unless -u)
+   */
+  private handleSetHook(parsed: ParsedCommand): CommandResult {
+    const isUnset = parsed.flags.get('u') === true;
+    const event = parsed.positional[0];
+
+    if (!event) {
+      return { output: 'Missing event name', success: false };
+    }
+
+    if (isUnset) {
+      hookService.unregister(event);
+      return { output: '', success: true };
+    }
+
+    const command = parsed.positional.slice(1).join(' ');
+    if (!command) {
+      return { output: 'Missing command argument', success: false };
+    }
+
+    hookService.register(event, command);
+    return { output: '', success: true };
+  }
+
+  /**
+   * show-hooks: List all registered hooks.
+   */
+  private handleShowHooks(): CommandResult {
+    const hooks = hookService.listAll();
+    if (hooks.length === 0) {
+      return { output: 'No hooks.', success: true };
+    }
+    const lines = hooks.map((h) => `${h.event} -> ${h.command}`);
+    return { output: lines.join('\n'), success: true };
   }
 
   // ==========================================================================
