@@ -9,6 +9,7 @@
  * list-buffers.
  */
 
+import fs from 'node:fs';
 import { logger } from '../utils/logger.js';
 import { sessionService } from './session-service.js';
 import { optionService } from './option-service.js';
@@ -25,6 +26,7 @@ import {
   rotatePaneIds,
   swapPanesInLayout,
 } from './layout-service.js';
+import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
 import type { ParsedCommand } from '../../../shared/tmux/command-registry.js';
 import type { OptionScope, PresetLayoutName, SplitDirection } from '../../../shared/types/models.js';
 
@@ -152,7 +154,7 @@ export class CommandService {
         case 'show-options':
           return this.handleShowOptions(parsed, ctx);
         case 'source-file':
-          return this.stubSuccess();
+          return this.handleSourceFile(parsed, ctx);
 
         // ================================================================
         // Buffer commands
@@ -165,6 +167,8 @@ export class CommandService {
           return this.handleDeleteBuffer(parsed);
         case 'paste-buffer':
           return this.handlePasteBuffer(parsed, ctx);
+        case 'set-buffer':
+          return this.handleSetBuffer(parsed);
 
         // ================================================================
         // Hook commands
@@ -380,6 +384,53 @@ export class CommandService {
   }
 
   /**
+   * source-file: Read and execute commands from a file.
+   *
+   * Each non-empty, non-comment line (lines starting with #) is parsed and
+   * executed in order. Errors are collected with line numbers.
+   *
+   * Positional: file path
+   */
+  private handleSourceFile(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const filePath = parsed.positional[0];
+    if (!filePath) {
+      return { output: 'Missing file path', success: false };
+    }
+
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { output: `Cannot read file: ${msg}`, success: false };
+    }
+
+    const lines = content.split('\n');
+    const errors: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!.trim();
+      if (line === '' || line.startsWith('#')) continue;
+
+      const parseResult = defaultRegistry.parse(line);
+      if (!parseResult.ok) {
+        errors.push(`${filePath}:${i + 1}: ${parseResult.error}`);
+        continue;
+      }
+
+      const result = this.execute(parseResult.value, ctx);
+      if (!result.success) {
+        errors.push(`${filePath}:${i + 1}: ${result.output}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return { output: errors.join('\n'), success: false };
+    }
+    return { output: '', success: true };
+  }
+
+  /**
    * bind-key: Bind a key to a command.
    *
    * Flags: -T (key table, default "prefix"), -n (shorthand for -T root)
@@ -551,6 +602,29 @@ export class CommandService {
 
     if (deleteAfter) {
       pasteBufferService.delete(buffer.name);
+    }
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * set-buffer: Set or create a named paste buffer with given content.
+   *
+   * Flags: -b (buffer name, optional — auto-generated if omitted)
+   * Positional: data (buffer content)
+   */
+  private handleSetBuffer(parsed: ParsedCommand): CommandResult {
+    const bufferFlag = parsed.flags.get('b');
+    const content = parsed.positional[0];
+
+    if (content === undefined) {
+      return { output: 'Missing buffer content argument', success: false };
+    }
+
+    if (typeof bufferFlag === 'string') {
+      pasteBufferService.set(bufferFlag, content);
+    } else {
+      pasteBufferService.add(content);
     }
 
     return { output: '', success: true };
