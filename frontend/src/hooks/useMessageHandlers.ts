@@ -151,6 +151,16 @@ export function useMessageHandlers(): void {
           break;
         }
 
+        case 'activityAlert': {
+          const { windowId, alertType } = message.payload;
+          const flagUpdate: Partial<Record<string, boolean>> = {};
+          if (alertType === 'activity') flagUpdate.activityFlag = true;
+          if (alertType === 'bell') flagUpdate.bellFlag = true;
+          if (alertType === 'silence') flagUpdate.silenceFlag = true;
+          updateWindow(windowId, flagUpdate);
+          break;
+        }
+
         case 'error': {
           console.error('[Message] Error:', message.payload);
           break;
