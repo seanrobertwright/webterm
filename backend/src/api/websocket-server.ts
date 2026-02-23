@@ -16,6 +16,9 @@ import {
 } from './protocol.js';
 import { ptyManager } from '../services/pty-service.js';
 import { sessionService } from '../services/session-service.js';
+import { commandService } from '../services/command-service.js';
+import { pasteBufferService } from '../services/paste-buffer-service.js';
+import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
 import type { Pane, Layout, WindowWithPanes } from '@webterm/shared/models';
 import {
   createTerminalContext,
@@ -158,6 +161,7 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         createdAt: existingSession.createdAt,
         updatedAt: existingSession.updatedAt,
         activeWindowId: existingSession.activeWindowId,
+        lastWindowId: existingSession.lastWindowId ?? null,
       };
       sessionId = requestedSessionId;
       isReconnect = true;
@@ -245,6 +249,7 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         createdAt: dbSession.createdAt,
         updatedAt: dbSession.updatedAt,
         activeWindowId: dbSession.activeWindowId,
+        lastWindowId: dbSession.lastWindowId ?? null,
       });
     }
 
@@ -340,6 +345,7 @@ function createNewSession(sessionId: string): Session {
     createdAt: Date.now(),
     updatedAt: Date.now(),
     activeWindowId: null,
+    lastWindowId: null,
   };
 }
 
@@ -467,6 +473,85 @@ async function handleJsonMessage(
       await handleSwitchWindow(sessionCtx, message);
       break;
 
+    // Command execution
+    case 'executeCommand': {
+      const { command } = message.payload;
+      const parseResult = defaultRegistry.parse(command);
+
+      if (!parseResult.ok) {
+        sendJson(terminalCtx.ws, {
+          type: 'commandError',
+          payload: {
+            message: parseResult.error,
+            command,
+          },
+        });
+        return;
+      }
+
+      // Build command context from terminal handler state
+      let windowId = terminalCtx.windowId ?? '';
+      let paneId = terminalCtx.focusedPaneId ?? '';
+
+      // Look up session for fallback values
+      const session = sessionService.getSession(terminalCtx.sessionId);
+
+      // Fall back to session's active window if not tracked on context
+      if (!windowId && session?.activeWindowId) {
+        windowId = session.activeWindowId;
+      }
+
+      // Fall back to first pane in active window if no focused pane
+      if (!paneId && windowId && session) {
+        const win = session.windows.find((w) => w.id === windowId);
+        if (win && win.panes.length > 0) {
+          paneId = win.panes[0]!.id;
+        }
+      }
+
+      const ctx = {
+        sessionId: terminalCtx.sessionId,
+        windowId,
+        paneId,
+      };
+
+      const result = commandService.execute(parseResult.value, ctx);
+
+      if (result.success) {
+        sendJson(terminalCtx.ws, {
+          type: 'commandResult',
+          payload: {
+            output: result.output,
+            success: true,
+          },
+        });
+      } else {
+        sendJson(terminalCtx.ws, {
+          type: 'commandError',
+          payload: {
+            message: result.output,
+            command,
+          },
+        });
+      }
+      break;
+    }
+
+    // Paste buffer operations
+    case 'yankToBuffer': {
+      const { content, bufferName } = message.payload;
+      const name = pasteBufferService.add(content, bufferName);
+      sendJson(terminalCtx.ws, {
+        type: 'commandResult',
+        payload: {
+          output: name,
+          success: true,
+        },
+      });
+      logger.debug('Yanked to paste buffer', { bufferName: name, size: content.length });
+      break;
+    }
+
     default:
       logger.warn('Unknown message type', { type: (message as { type: string }).type });
       sendError(terminalCtx.ws, 'INVALID_MESSAGE', `Unknown message type: ${(message as { type: string }).type}`);
@@ -545,6 +630,15 @@ function stopHeartbeat(): void {
     clearInterval(serverState.heartbeatInterval);
     serverState.heartbeatInterval = null;
     logger.debug('Heartbeat stopped');
+  }
+}
+
+/**
+ * Send a JSON message to client
+ */
+function sendJson(ws: WebSocket, message: object): void {
+  if (ws.readyState === ws.OPEN) {
+    ws.send(JSON.stringify(message));
   }
 }
 
