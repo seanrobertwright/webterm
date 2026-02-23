@@ -33,6 +33,7 @@ interface SessionRow {
   created_at: number;
   updated_at: number;
   active_window_id: string | null;
+  last_window_id: string | null;
 }
 
 interface WindowRow {
@@ -42,6 +43,11 @@ interface WindowRow {
   idx: number;
   layout: string;
   created_at: number;
+  auto_rename: number;
+  last_active_at: number | null;
+  monitor_activity: number;
+  monitor_silence: number;
+  monitor_bell: number;
 }
 
 interface PaneRow {
@@ -54,6 +60,8 @@ interface PaneRow {
   connection_state: string;
   exit_code: number | null;
   created_at: number;
+  title: string;
+  marked: number;
 }
 
 /**
@@ -118,6 +126,9 @@ export class SessionService {
         connectionState: 'disconnected',
         exitCode: null,
         createdAt: now,
+        title: '',
+        marked: false,
+        currentCommand: null,
       };
 
       const window: WindowWithPanes = {
@@ -128,6 +139,14 @@ export class SessionService {
         layout: initialLayout,
         panes: [pane],
         createdAt: now,
+        autoRename: true,
+        lastActiveAt: now,
+        monitorActivity: false,
+        monitorSilence: 0,
+        monitorBell: true,
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
 
       const session: SessionWithWindows = {
@@ -136,6 +155,7 @@ export class SessionService {
         createdAt: now,
         updatedAt: now,
         activeWindowId: windowId,
+        lastWindowId: null,
         windows: [window],
       };
 
@@ -150,7 +170,7 @@ export class SessionService {
     const db = getDatabase();
 
     const sessionRow = db.prepare(`
-      SELECT id, name, created_at, updated_at, active_window_id
+      SELECT id, name, created_at, updated_at, active_window_id, last_window_id
       FROM sessions WHERE id = ?
     `).get(id) as SessionRow | undefined;
 
@@ -159,13 +179,15 @@ export class SessionService {
     }
 
     const windowRows = db.prepare(`
-      SELECT id, session_id, name, idx, layout, created_at
+      SELECT id, session_id, name, idx, layout, created_at,
+             auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
       FROM windows WHERE session_id = ? ORDER BY idx
     `).all(id) as WindowRow[];
 
     const windows: WindowWithPanes[] = windowRows.map((windowRow) => {
       const paneRows = db.prepare(`
-        SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at
+        SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+               title, marked
         FROM panes WHERE window_id = ?
       `).all(windowRow.id) as PaneRow[];
 
@@ -179,6 +201,9 @@ export class SessionService {
         connectionState: paneRow.connection_state as Pane['connectionState'],
         exitCode: paneRow.exit_code,
         createdAt: paneRow.created_at,
+        title: paneRow.title ?? '',
+        marked: Boolean(paneRow.marked),
+        currentCommand: null,
       }));
 
       return {
@@ -189,6 +214,14 @@ export class SessionService {
         layout: parseLayout(windowRow.layout) ?? createLeafLayout(panes[0]?.id ?? ''),
         panes,
         createdAt: windowRow.created_at,
+        autoRename: Boolean(windowRow.auto_rename ?? 1),
+        lastActiveAt: windowRow.last_active_at ?? null,
+        monitorActivity: Boolean(windowRow.monitor_activity),
+        monitorSilence: windowRow.monitor_silence ?? 0,
+        monitorBell: Boolean(windowRow.monitor_bell ?? 1),
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
     });
 
@@ -198,6 +231,7 @@ export class SessionService {
       createdAt: sessionRow.created_at,
       updatedAt: sessionRow.updated_at,
       activeWindowId: sessionRow.active_window_id,
+      lastWindowId: sessionRow.last_window_id ?? null,
       windows,
     };
   }
@@ -406,6 +440,9 @@ export class SessionService {
         connectionState: 'disconnected',
         exitCode: null,
         createdAt: now,
+        title: '',
+        marked: false,
+        currentCommand: null,
       };
 
       return {
@@ -416,6 +453,14 @@ export class SessionService {
         layout,
         panes: [pane],
         createdAt: now,
+        autoRename: true,
+        lastActiveAt: now,
+        monitorActivity: false,
+        monitorSilence: 0,
+        monitorBell: true,
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
     });
   }
@@ -479,6 +524,9 @@ export class SessionService {
       connectionState: 'disconnected',
       exitCode: null,
       createdAt: now,
+      title: '',
+      marked: false,
+      currentCommand: null,
     };
   }
 
@@ -506,7 +554,8 @@ export class SessionService {
     const db = getDatabase();
 
     const row = db.prepare(`
-      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at
+      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+             title, marked
       FROM panes WHERE id = ?
     `).get(paneId) as PaneRow | undefined;
 
@@ -524,6 +573,9 @@ export class SessionService {
       connectionState: row.connection_state as Pane['connectionState'],
       exitCode: row.exit_code,
       createdAt: row.created_at,
+      title: row.title ?? '',
+      marked: Boolean(row.marked),
+      currentCommand: null,
     };
   }
 
@@ -536,6 +588,101 @@ export class SessionService {
     const result = db.prepare(`
       UPDATE panes SET cols = ?, rows = ? WHERE id = ?
     `).run(cols, rows, paneId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Get a window by ID with layout and panes
+   */
+  getWindow(windowId: string): WindowWithPanes | null {
+    const db = getDatabase();
+
+    const windowRow = db.prepare(`
+      SELECT id, session_id, name, idx, layout, created_at,
+             auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
+      FROM windows WHERE id = ?
+    `).get(windowId) as WindowRow | undefined;
+
+    if (!windowRow) {
+      return null;
+    }
+
+    const paneRows = db.prepare(`
+      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+             title, marked
+      FROM panes WHERE window_id = ?
+    `).all(windowId) as PaneRow[];
+
+    const panes: Pane[] = paneRows.map((paneRow) => ({
+      id: paneRow.id,
+      windowId: paneRow.window_id,
+      shell: paneRow.shell as ShellType,
+      cwd: paneRow.cwd,
+      cols: paneRow.cols,
+      rows: paneRow.rows,
+      connectionState: paneRow.connection_state as Pane['connectionState'],
+      exitCode: paneRow.exit_code,
+      createdAt: paneRow.created_at,
+      title: paneRow.title ?? '',
+      marked: Boolean(paneRow.marked),
+      currentCommand: null,
+    }));
+
+    return {
+      id: windowRow.id,
+      sessionId: windowRow.session_id,
+      name: windowRow.name,
+      index: windowRow.idx,
+      layout: parseLayout(windowRow.layout) ?? createLeafLayout(panes[0]?.id ?? ''),
+      panes,
+      createdAt: windowRow.created_at,
+      autoRename: Boolean(windowRow.auto_rename ?? 1),
+      lastActiveAt: windowRow.last_active_at ?? null,
+      monitorActivity: Boolean(windowRow.monitor_activity),
+      monitorSilence: windowRow.monitor_silence ?? 0,
+      monitorBell: Boolean(windowRow.monitor_bell ?? 1),
+      activityFlag: false,
+      bellFlag: false,
+      silenceFlag: false,
+    };
+  }
+
+  /**
+   * Update pane marked status
+   */
+  updatePaneMarked(paneId: string, marked: boolean): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE panes SET marked = ? WHERE id = ?
+    `).run(marked ? 1 : 0, paneId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Move a pane record to a different window (update its window_id in the DB)
+   */
+  movePaneToWindow(paneId: string, targetWindowId: string): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE panes SET window_id = ? WHERE id = ?
+    `).run(targetWindowId, paneId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Rename a window
+   */
+  renameWindow(windowId: string, name: string): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE windows SET name = ? WHERE id = ?
+    `).run(name, windowId);
 
     return result.changes > 0;
   }

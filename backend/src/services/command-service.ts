@@ -76,7 +76,7 @@ export class CommandService {
         case 'kill-window':
           return this.stubSuccess();
         case 'rename-window':
-          return this.stubSuccess();
+          return this.handleRenameWindow(parsed, ctx);
         case 'select-window':
           return this.handleSelectWindow(parsed, ctx);
         case 'last-window':
@@ -517,6 +517,29 @@ export class CommandService {
     }
 
     return { output: targetWindow.id, success: true };
+  }
+
+  /**
+   * rename-window: Rename a window.
+   *
+   * Positional: new name
+   * Flags: -t (target window ID, optional — defaults to current)
+   */
+  private handleRenameWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const windowId = typeof targetFlag === 'string' ? targetFlag : ctx.windowId;
+
+    const newName = parsed.positional[0];
+    if (newName === undefined) {
+      return { output: 'Missing window name argument', success: false };
+    }
+
+    const updated = sessionService.renameWindow(windowId, newName);
+    if (!updated) {
+      return { output: `Window not found: ${windowId}`, success: false };
+    }
+
+    return { output: '', success: true };
   }
 
   // ==========================================================================
