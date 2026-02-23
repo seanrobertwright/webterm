@@ -32,15 +32,7 @@ export function useMessageHandlers(): void {
           setWindowId(window.id);
 
           // Update session store
-          addWindow({
-            id: window.id,
-            sessionId: window.sessionId,
-            name: window.name,
-            index: window.index,
-            createdAt: window.createdAt,
-            layout: window.layout,
-            panes: window.panes,
-          });
+          addWindow(window);
 
           break;
         }
@@ -76,6 +68,17 @@ export function useMessageHandlers(): void {
         case 'windowClosed': {
           const { windowId } = message.payload;
           removeWindow(windowId);
+          break;
+        }
+
+        case 'pasteFromBuffer': {
+          // Server pushed paste buffer content — write it to the active pane as input
+          const { content } = message.payload;
+          const activePane = usePaneStore.getState().activePane;
+          if (activePane && content) {
+            const wsClient = getWebSocketClient();
+            wsClient.sendInput(activePane, content);
+          }
           break;
         }
 

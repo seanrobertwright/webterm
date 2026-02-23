@@ -254,6 +254,18 @@ export class WebSocketClient {
     });
   }
 
+  /** Send yank-to-buffer message (copy mode yank) */
+  sendYankToBuffer(content: string, bufferName?: string): void {
+    const payload: { content: string; bufferName?: string } = { content };
+    if (bufferName !== undefined) {
+      payload.bufferName = bufferName;
+    }
+    this.sendJson({
+      type: 'yankToBuffer',
+      payload,
+    });
+  }
+
   // ============================================================================
   // Private Methods
   // ============================================================================
