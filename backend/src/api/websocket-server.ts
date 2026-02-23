@@ -209,6 +209,33 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         ws.send(JSON.stringify(message));
       }
     },
+    onTitleChange: (paneId, title) => {
+      // Update pane title in DB
+      sessionService.updatePaneTitle(paneId, title);
+
+      // Send paneTitleChanged message to client
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'paneTitleChanged',
+          payload: { paneId, title },
+        }));
+      }
+
+      // If the pane's window has auto-rename enabled, update the window name
+      const pane = sessionService.getPane(paneId);
+      if (pane) {
+        const window = sessionService.getWindow(pane.windowId);
+        if (window && window.autoRename) {
+          sessionService.renameWindow(window.id, title);
+          if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'windowRenamed',
+              payload: { windowId: window.id, name: title },
+            }));
+          }
+        }
+      }
+    },
   });
 
   // Create client connection
@@ -518,6 +545,59 @@ async function handleJsonMessage(
       const result = commandService.execute(parseResult.value, ctx);
 
       if (result.success) {
+        // Handle special output markers from command handlers
+        if (result.output === '__DETACH__') {
+          // Send detach confirmation to client, then close the connection.
+          // Session and PTYs remain running for later reconnection.
+          sendJson(terminalCtx.ws, {
+            type: 'sessionDetached',
+            payload: {
+              sessionId: terminalCtx.sessionId,
+              reason: 'detach-client',
+            },
+          });
+          // Close the WebSocket gracefully after a short delay so the
+          // sessionDetached message has time to be sent.
+          setTimeout(() => {
+            const client = serverState?.clients.get(terminalCtx.sessionId);
+            if (client) {
+              client.ws.close(1000, 'Client detached');
+              serverState?.clients.delete(terminalCtx.sessionId);
+            }
+          }, 100);
+          break;
+        }
+
+        if (result.output.startsWith('__SWITCH__:')) {
+          const targetSessionId = result.output.slice('__SWITCH__:'.length);
+          const targetSession = sessionService.getSession(targetSessionId);
+          if (targetSession) {
+            sendJson(terminalCtx.ws, {
+              type: 'sessionSwitched',
+              payload: {
+                sessionId: targetSession.id,
+                session: {
+                  id: targetSession.id,
+                  name: targetSession.name,
+                  createdAt: targetSession.createdAt,
+                  updatedAt: targetSession.updatedAt,
+                  activeWindowId: targetSession.activeWindowId,
+                  lastWindowId: targetSession.lastWindowId,
+                },
+              },
+            });
+          } else {
+            sendJson(terminalCtx.ws, {
+              type: 'commandError',
+              payload: {
+                message: `Session not found: ${targetSessionId}`,
+                command,
+              },
+            });
+          }
+          break;
+        }
+
         sendJson(terminalCtx.ws, {
           type: 'commandResult',
           payload: {

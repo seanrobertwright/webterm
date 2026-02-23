@@ -70,7 +70,7 @@ export class CommandService {
         case 'rename-session':
           return this.stubSuccess();
         case 'detach-client':
-          return this.stubSuccess();
+          return this.handleDetachClient();
         case 'switch-client':
           return this.stubSuccess();
         case 'list-sessions':
@@ -208,6 +208,17 @@ export class CommandService {
   // ==========================================================================
   // Working handlers
   // ==========================================================================
+
+  /**
+   * detach-client: Detach the current client from the session.
+   *
+   * Returns a special output marker that the WebSocket handler intercepts
+   * to send a `sessionDetached` message to the client. The session and its
+   * PTYs remain running; only the client connection is cleaned up.
+   */
+  private handleDetachClient(): CommandResult {
+    return { output: '__DETACH__', success: true };
+  }
 
   /**
    * list-sessions: List all sessions in a table-like format.
