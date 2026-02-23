@@ -80,7 +80,7 @@ export class CommandService {
         case 'select-window':
           return this.handleSelectWindow(parsed, ctx);
         case 'last-window':
-          return this.stubSuccess();
+          return this.handleLastWindow(ctx);
         case 'next-window':
           return this.stubSuccess();
         case 'previous-window':
@@ -90,7 +90,7 @@ export class CommandService {
         case 'move-window':
           return this.handleMoveWindow(parsed, ctx);
         case 'find-window':
-          return this.stubSuccess();
+          return this.handleFindWindow(parsed, ctx);
 
         // ================================================================
         // Pane commands
@@ -585,6 +585,84 @@ export class CommandService {
     }
 
     return { output: '', success: true };
+  }
+
+  /**
+   * last-window: Switch to the last selected window.
+   *
+   * Uses session.lastWindowId to determine the previous window.
+   * Returns the window ID as output.
+   */
+  private handleLastWindow(ctx: CommandContext): CommandResult {
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    if (!session.lastWindowId) {
+      return { output: 'No last window', success: false };
+    }
+
+    // Verify the last window still exists
+    const lastWindow = sessionService.getWindow(session.lastWindowId);
+    if (!lastWindow) {
+      return { output: 'Last window no longer exists', success: false };
+    }
+
+    return { output: session.lastWindowId, success: true };
+  }
+
+  /**
+   * find-window: Search for windows matching a string.
+   *
+   * Positional: search string
+   * Searches window names and pane titles across all windows in the session.
+   * Returns matching window list as formatted output.
+   */
+  private handleFindWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const searchString = parsed.positional[0];
+    if (searchString === undefined) {
+      return { output: 'Missing search string argument', success: false };
+    }
+
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    const needle = searchString.toLowerCase();
+    const matches: string[] = [];
+
+    for (const window of session.windows) {
+      let matched = false;
+
+      // Check window name
+      if (window.name.toLowerCase().includes(needle)) {
+        matched = true;
+      }
+
+      // Check pane titles
+      if (!matched) {
+        for (const pane of window.panes) {
+          if (pane.title.toLowerCase().includes(needle)) {
+            matched = true;
+            break;
+          }
+        }
+      }
+
+      if (matched) {
+        const paneCount = window.panes.length;
+        const paneSuffix = paneCount === 1 ? 'pane' : 'panes';
+        matches.push(`${window.index}: ${window.name} (${paneCount} ${paneSuffix}) [${window.id}]`);
+      }
+    }
+
+    if (matches.length === 0) {
+      return { output: `No windows matching: ${searchString}`, success: true };
+    }
+
+    return { output: matches.join('\n'), success: true };
   }
 
   // ==========================================================================

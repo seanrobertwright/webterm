@@ -723,6 +723,19 @@ export class SessionService {
   }
 
   /**
+   * Update the last-window tracking for a session.
+   * Should be called when switching away from a window so that
+   * `last-window` can switch back to it.
+   */
+  updateLastWindow(sessionId: string, windowId: string): void {
+    const db = getDatabase();
+
+    db.prepare(`
+      UPDATE sessions SET last_window_id = ?, updated_at = ? WHERE id = ?
+    `).run(windowId, Date.now(), sessionId);
+  }
+
+  /**
    * Check if a session name already exists
    */
   sessionNameExists(name: string, excludeId?: string): boolean {
