@@ -72,7 +72,7 @@ export class CommandService {
         case 'detach-client':
           return this.handleDetachClient();
         case 'switch-client':
-          return this.stubSuccess();
+          return this.handleSwitchClient(parsed, ctx);
         case 'list-sessions':
           return this.handleListSessions();
 
@@ -218,6 +218,62 @@ export class CommandService {
    */
   private handleDetachClient(): CommandResult {
     return { output: '__DETACH__', success: true };
+  }
+
+  /**
+   * switch-client: Switch the current client to a different session.
+   *
+   * Flags: -n (next session), -p (previous session), -t (target by name/ID)
+   *
+   * Returns a special output marker `__SWITCH__:{sessionId}` that the
+   * WebSocket handler intercepts to send a `sessionSwitched` message.
+   */
+  private handleSwitchClient(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const nextFlag = parsed.flags.get('n') === true;
+    const prevFlag = parsed.flags.get('p') === true;
+    const targetFlag = parsed.flags.get('t');
+
+    const sessions = sessionService.getAllSessions();
+    if (sessions.length === 0) {
+      return { output: 'No sessions', success: false };
+    }
+
+    // -t: Look up by name or ID
+    if (typeof targetFlag === 'string') {
+      const target = sessions.find(
+        (s) => s.id === targetFlag || s.name === targetFlag,
+      );
+      if (!target) {
+        return { output: `Session not found: ${targetFlag}`, success: false };
+      }
+      return { output: `__SWITCH__:${target.id}`, success: true };
+    }
+
+    // -n or -p: Find current session index and navigate
+    const currentIndex = sessions.findIndex((s) => s.id === ctx.sessionId);
+    if (currentIndex === -1) {
+      return { output: 'Current session not found in session list', success: false };
+    }
+
+    if (sessions.length < 2) {
+      return { output: 'No other sessions', success: false };
+    }
+
+    let targetIndex: number;
+    if (nextFlag) {
+      targetIndex = (currentIndex + 1) % sessions.length;
+    } else if (prevFlag) {
+      targetIndex = (currentIndex - 1 + sessions.length) % sessions.length;
+    } else {
+      return { output: 'No target specified (use -n, -p, or -t)', success: false };
+    }
+
+    const targetSession = sessions[targetIndex];
+    if (!targetSession) {
+      return { output: 'Target session not found', success: false };
+    }
+
+    return { output: `__SWITCH__:${targetSession.id}`, success: true };
   }
 
   /**
