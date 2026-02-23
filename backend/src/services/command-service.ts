@@ -16,15 +16,23 @@ import { pasteBufferService } from './paste-buffer-service.js';
 import { keybindingService } from './keybinding-service.js';
 import { ptyManager } from './pty-service.js';
 import {
+  applyPresetLayout,
   extractPane,
   findAdjacentPane,
   getPaneIds,
   insertPaneIntoLayout,
+  PRESET_LAYOUT_ORDER,
   rotatePaneIds,
   swapPanesInLayout,
 } from './layout-service.js';
 import type { ParsedCommand } from '../../../shared/tmux/command-registry.js';
-import type { OptionScope, SplitDirection } from '../../../shared/types/models.js';
+import type { OptionScope, PresetLayoutName, SplitDirection } from '../../../shared/types/models.js';
+
+/**
+ * Module-level map tracking which preset layout index each window is currently at.
+ * Used by next-layout / previous-layout to cycle through presets.
+ */
+const windowLayoutIndex = new Map<string, number>();
 
 // ============================================================================
 // Types
@@ -120,11 +128,11 @@ export class CommandService {
         // Layout commands
         // ================================================================
         case 'select-layout':
-          return this.stubSuccess();
+          return this.handleSelectLayout(parsed, ctx);
         case 'next-layout':
-          return this.stubSuccess();
+          return this.handleNextLayout(ctx);
         case 'previous-layout':
-          return this.stubSuccess();
+          return this.handlePreviousLayout(ctx);
 
         // ================================================================
         // Key binding commands
@@ -1031,6 +1039,107 @@ export class CommandService {
     const panes = paneIds.map((id, index) => ({ id, index }));
 
     return { output: `__DISPLAY_PANES__:${JSON.stringify(panes)}`, success: true };
+  }
+
+  // ==========================================================================
+  // Layout operation handlers
+  // ==========================================================================
+
+  /**
+   * select-layout: Apply a named preset layout to the current window.
+   *
+   * Positional: layout name (e.g., "even-horizontal", "main-vertical")
+   */
+  private handleSelectLayout(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const layoutName = parsed.positional[0];
+    if (layoutName === undefined) {
+      return { output: 'Missing layout name argument', success: false };
+    }
+
+    // Validate layout name
+    const validNames: readonly string[] = PRESET_LAYOUT_ORDER;
+    if (!validNames.includes(layoutName)) {
+      return {
+        output: `Unknown layout: ${layoutName}. Valid layouts: ${PRESET_LAYOUT_ORDER.join(', ')}`,
+        success: false,
+      };
+    }
+
+    const presetName = layoutName as PresetLayoutName;
+
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const paneIds = getPaneIds(window.layout);
+    if (paneIds.length === 0) {
+      return { output: 'No panes in window', success: false };
+    }
+
+    const newLayout = applyPresetLayout(presetName, paneIds);
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+
+    // Track the selected index for next/previous cycling
+    const idx = PRESET_LAYOUT_ORDER.indexOf(presetName);
+    windowLayoutIndex.set(ctx.windowId, idx);
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * next-layout: Cycle forward through preset layouts.
+   *
+   * Advances to the next preset in PRESET_LAYOUT_ORDER (wraps around).
+   */
+  private handleNextLayout(ctx: CommandContext): CommandResult {
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const paneIds = getPaneIds(window.layout);
+    if (paneIds.length === 0) {
+      return { output: 'No panes in window', success: false };
+    }
+
+    const currentIndex = windowLayoutIndex.get(ctx.windowId) ?? -1;
+    const nextIndex = (currentIndex + 1) % PRESET_LAYOUT_ORDER.length;
+    const presetName = PRESET_LAYOUT_ORDER[nextIndex]!;
+
+    const newLayout = applyPresetLayout(presetName, paneIds);
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+    windowLayoutIndex.set(ctx.windowId, nextIndex);
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * previous-layout: Cycle backward through preset layouts.
+   *
+   * Goes to the previous preset in PRESET_LAYOUT_ORDER (wraps around).
+   */
+  private handlePreviousLayout(ctx: CommandContext): CommandResult {
+    const window = sessionService.getWindow(ctx.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    const paneIds = getPaneIds(window.layout);
+    if (paneIds.length === 0) {
+      return { output: 'No panes in window', success: false };
+    }
+
+    const currentIndex = windowLayoutIndex.get(ctx.windowId) ?? 1;
+    const prevIndex =
+      (currentIndex - 1 + PRESET_LAYOUT_ORDER.length) % PRESET_LAYOUT_ORDER.length;
+    const presetName = PRESET_LAYOUT_ORDER[prevIndex]!;
+
+    const newLayout = applyPresetLayout(presetName, paneIds);
+    sessionService.updateWindowLayout(ctx.windowId, newLayout);
+    windowLayoutIndex.set(ctx.windowId, prevIndex);
+
+    return { output: '', success: true };
   }
 
   // ==========================================================================
