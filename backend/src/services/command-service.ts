@@ -86,9 +86,9 @@ export class CommandService {
         case 'previous-window':
           return this.stubSuccess();
         case 'swap-window':
-          return this.stubSuccess();
+          return this.handleSwapWindow(parsed, ctx);
         case 'move-window':
-          return this.stubSuccess();
+          return this.handleMoveWindow(parsed, ctx);
         case 'find-window':
           return this.stubSuccess();
 
@@ -537,6 +537,51 @@ export class CommandService {
     const updated = sessionService.renameWindow(windowId, newName);
     if (!updated) {
       return { output: `Window not found: ${windowId}`, success: false };
+    }
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * swap-window: Swap the indices of the current window and target window.
+   *
+   * Flags: -t (target window ID)
+   */
+  private handleSwapWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Missing target window (-t flag)', success: false };
+    }
+
+    const swapped = sessionService.swapWindowIndices(ctx.windowId, targetFlag);
+    if (!swapped) {
+      return { output: 'Failed to swap windows: one or both not found', success: false };
+    }
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * move-window: Move the current window to a target index position.
+   *
+   * Flags: -t (target index)
+   */
+  private handleMoveWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Missing target index (-t flag)', success: false };
+    }
+
+    const targetIndex = parseInt(targetFlag, 10);
+    if (isNaN(targetIndex) || targetIndex < 0) {
+      return { output: `Invalid target index: ${targetFlag}`, success: false };
+    }
+
+    const moved = sessionService.moveWindowToIndex(ctx.windowId, targetIndex);
+    if (!moved) {
+      return { output: `Window not found: ${ctx.windowId}`, success: false };
     }
 
     return { output: '', success: true };

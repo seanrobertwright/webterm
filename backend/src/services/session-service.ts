@@ -688,6 +688,41 @@ export class SessionService {
   }
 
   /**
+   * Swap the indices of two windows
+   */
+  swapWindowIndices(windowId1: string, windowId2: string): boolean {
+    const db = getDatabase();
+
+    const row1 = db.prepare('SELECT idx FROM windows WHERE id = ?').get(windowId1) as { idx: number } | undefined;
+    const row2 = db.prepare('SELECT idx FROM windows WHERE id = ?').get(windowId2) as { idx: number } | undefined;
+
+    if (!row1 || !row2) {
+      return false;
+    }
+
+    return transaction(() => {
+      // Use a temporary index to avoid unique constraint conflicts
+      db.prepare('UPDATE windows SET idx = -1 WHERE id = ?').run(windowId1);
+      db.prepare('UPDATE windows SET idx = ? WHERE id = ?').run(row1.idx, windowId2);
+      db.prepare('UPDATE windows SET idx = ? WHERE id = ?').run(row2.idx, windowId1);
+      return true;
+    });
+  }
+
+  /**
+   * Move a window to a specific index position
+   */
+  moveWindowToIndex(windowId: string, targetIndex: number): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE windows SET idx = ? WHERE id = ?
+    `).run(targetIndex, windowId);
+
+    return result.changes > 0;
+  }
+
+  /**
    * Check if a session name already exists
    */
   sessionNameExists(name: string, excludeId?: string): boolean {
