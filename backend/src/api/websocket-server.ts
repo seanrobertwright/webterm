@@ -19,6 +19,7 @@ import { sessionService } from '../services/session-service.js';
 import { commandService } from '../services/command-service.js';
 import { pasteBufferService } from '../services/paste-buffer-service.js';
 import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
+import { getPaneIds } from '../services/layout-service.js';
 import type { Pane, Layout, WindowWithPanes } from '@webterm/shared/models';
 import {
   createTerminalContext,
@@ -629,6 +630,48 @@ async function handleJsonMessage(
         },
       });
       logger.debug('Yanked to paste buffer', { bufferName: name, size: content.length });
+      break;
+    }
+
+    // Choose-tree data request
+    case 'requestChooseTree': {
+      const allSessions = sessionService.getAllSessions();
+      const connectedSessionIds = new Set(getConnectedSessions());
+
+      const sessions = allSessions.map((s) => {
+        const fullSession = sessionService.getSession(s.id);
+        const windows = (fullSession?.windows ?? []).map((win) => {
+          const paneIds = getPaneIds(win.layout);
+          const panes = win.panes.map((pane, idx) => ({
+            id: pane.id,
+            index: idx,
+            active: pane.id === (paneIds[0] ?? ''),
+            title: pane.title || pane.shell,
+            currentCommand: pane.currentCommand,
+            size: `${String(pane.cols)}x${String(pane.rows)}`,
+          }));
+
+          return {
+            id: win.id,
+            index: win.index,
+            name: win.name,
+            active: win.id === fullSession?.activeWindowId,
+            panes,
+          };
+        });
+
+        return {
+          id: s.id,
+          name: s.name,
+          attached: connectedSessionIds.has(s.id) ? 1 : 0,
+          windows,
+        };
+      });
+
+      sendJson(terminalCtx.ws, {
+        type: 'chooseTreeData',
+        payload: { sessions },
+      });
       break;
     }
 
