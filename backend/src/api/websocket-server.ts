@@ -861,13 +861,13 @@ async function handleJsonMessage(
           },
         });
 
-        // After successful set-option, broadcast optionChanged to the client
+        // After successful set-option, broadcast optionChanged to all session clients
         if (parseResult.value.command === 'set-option') {
           const optName = parseResult.value.positional[0];
           const optValue = parseResult.value.positional[1] ?? '';
           const isUnset = parseResult.value.flags.get('u') === true;
           if (optName && !isUnset) {
-            sendJson(terminalCtx.ws, {
+            broadcastJsonToSession(terminalCtx.sessionId, {
               type: 'optionChanged',
               payload: { name: optName, value: optValue, scope: 'session' },
             });
