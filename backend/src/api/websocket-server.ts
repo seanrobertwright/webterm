@@ -561,9 +561,17 @@ function setupWebSocketHandlers(client: ClientConnection): void {
   ws.on('message', async (data: Buffer, isBinary: boolean) => {
     try {
       if (isBinary) {
+        // Read-only clients cannot send input to PTY
+        if (client.readOnly) {
+          logger.debug('Blocked input from read-only client', {
+            sessionId,
+            clientId: client.clientId,
+          });
+          return;
+        }
         await handleBinaryMessage(terminalCtx, data);
       } else {
-        await handleJsonMessage(terminalCtx, sessionCtx, data.toString());
+        await handleJsonMessage(client, terminalCtx, sessionCtx, data.toString());
       }
     } catch (error) {
       logger.error('Error handling message', { sessionId, error });
@@ -619,6 +627,7 @@ async function handleBinaryMessage(
  * Handle JSON message (control operations)
  */
 async function handleJsonMessage(
+  client: ClientConnection,
   terminalCtx: TerminalHandlerContext,
   sessionCtx: SessionHandlerContext,
   data: string
@@ -897,6 +906,27 @@ async function handleJsonMessage(
         },
       });
       logger.debug('Yanked to paste buffer', { bufferName: name, size: content.length });
+      break;
+    }
+
+    // Client flag operations
+    case 'setClientFlag': {
+      const { flag, value } = message.payload;
+      if (flag === 'readOnly') {
+        client.readOnly = value;
+        logger.info('Client read-only flag updated', {
+          clientId: client.clientId,
+          sessionId: client.sessionId,
+          readOnly: value,
+        });
+        sendJson(terminalCtx.ws, {
+          type: 'commandResult',
+          payload: {
+            output: `Read-only mode ${value ? 'enabled' : 'disabled'}`,
+            success: true,
+          },
+        });
+      }
       break;
     }
 
