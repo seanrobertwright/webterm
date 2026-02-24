@@ -19,6 +19,7 @@ import { sessionService } from '../services/session-service.js';
 import { commandService } from '../services/command-service.js';
 import { pasteBufferService } from '../services/paste-buffer-service.js';
 import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
+import { hookService } from '../services/hook-service.js';
 import { getPaneIds } from '../services/layout-service.js';
 import type { Pane, Layout, WindowWithPanes } from '@webterm/shared/models';
 import {
@@ -51,10 +52,13 @@ import type { Session } from '@webterm/shared/models';
 /** Client connection state */
 interface ClientConnection {
   ws: WebSocket;
+  clientId: string;
   sessionId: string;
   terminalCtx: TerminalHandlerContext;
   sessionCtx: SessionHandlerContext;
   isAlive: boolean;
+  readOnly: boolean;
+  connectedAt: number;
 }
 
 /** Output buffer for disconnected sessions */
@@ -67,7 +71,7 @@ interface DisconnectedBuffer {
 /** WebSocket server state */
 interface WebSocketServerState {
   wss: WebSocketServer;
-  clients: Map<string, ClientConnection>; // sessionId -> connection
+  clients: Map<string, Set<ClientConnection>>; // sessionId -> set of connections
   disconnectedBuffers: Map<string, DisconnectedBuffer>;
   heartbeatInterval: NodeJS.Timeout | null;
 }
@@ -156,7 +160,7 @@ function getPaneWindowContext(paneId: string): {
  * Reset or start the silence timer for a window.
  * When the timer fires (no output for monitorSilence seconds), sends a silence alert.
  */
-function resetSilenceTimer(ws: WebSocket, windowId: string, windowName: string, silenceSeconds: number): void {
+function resetSilenceTimer(windowId: string, windowName: string, silenceSeconds: number): void {
   // Clear existing timer
   const existing = silenceTimers.get(windowId);
   if (existing) {
@@ -173,17 +177,21 @@ function resetSilenceTimer(ws: WebSocket, windowId: string, windowName: string, 
     const flags = getWindowFlags(windowId);
     if (!flags.silence) {
       flags.silence = true;
-      // Find the client for this window's session
+      // Find all clients for this window's session
       const win = sessionService.getWindow(windowId);
       if (win) {
-        const client = serverState?.clients.get(win.sessionId);
-        if (client && client.ws.readyState === client.ws.OPEN) {
-          sendActivityAlert(
-            client.ws,
-            windowId,
-            'silence',
-            `Silence in window '${windowName}' (${String(silenceSeconds)}s)`
-          );
+        const clients = serverState?.clients.get(win.sessionId);
+        if (clients) {
+          for (const client of clients) {
+            if (client.ws.readyState === client.ws.OPEN) {
+              sendActivityAlert(
+                client.ws,
+                windowId,
+                'silence',
+                `Silence in window '${windowName}' (${String(silenceSeconds)}s)`
+              );
+            }
+          }
         }
       }
     }
@@ -297,13 +305,7 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     logger.info('New session created', { sessionId });
   }
 
-  // Check if there's already a connection for this session
-  const existingConnection = serverState?.clients.get(sessionId);
-  if (existingConnection) {
-    // Close old connection
-    existingConnection.ws.close(1000, 'New connection established');
-    serverState?.clients.delete(sessionId);
-  }
+  // Multi-client: we no longer close existing connections when a new one arrives
 
   // Create handler contexts
   const terminalCtx = createTerminalContext(sessionId, ws);
@@ -312,18 +314,17 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
   // Set up PTY event handlers for this session
   ptyManager.setEventHandlers({
     onData: (paneId, data) => {
-      if (ws.readyState === ws.OPEN) {
-        const outputBuffer = Buffer.from(data, 'utf-8');
-        const message = encodeBinaryMessage(MessageType.OUTPUT, paneId, new Uint8Array(outputBuffer));
-        ws.send(message);
-      }
+      // Broadcast binary output to all clients connected to this session
+      const outputBuffer = Buffer.from(data, 'utf-8');
+      const message = encodeBinaryMessage(MessageType.OUTPUT, paneId, new Uint8Array(outputBuffer));
+      broadcastBinaryToSession(sessionId, message);
 
       // Activity and silence monitoring
       const ctx = getPaneWindowContext(paneId);
       if (ctx) {
         // Reset silence timer whenever output is received (regardless of active window)
         if (ctx.monitorSilence > 0) {
-          resetSilenceTimer(ws, ctx.windowId, ctx.windowName, ctx.monitorSilence);
+          resetSilenceTimer(ctx.windowId, ctx.windowName, ctx.monitorSilence);
         }
 
         // Activity monitoring: only alert for non-active windows
@@ -331,39 +332,34 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
           const flags = getWindowFlags(ctx.windowId);
           if (!flags.activity) {
             flags.activity = true;
-            if (ws.readyState === ws.OPEN) {
-              sendActivityAlert(
-                ws,
-                ctx.windowId,
-                'activity',
-                `Activity in window '${ctx.windowName}'`
-              );
-            }
+            broadcastJsonToSession(sessionId, {
+              type: 'activityAlert',
+              payload: {
+                windowId: ctx.windowId,
+                alertType: 'activity',
+                message: `Activity in window '${ctx.windowName}'`,
+              },
+            });
           }
         }
       }
     },
     onExit: (paneId, exitCode) => {
-      // Send pane exited message
-      const message = {
+      // Broadcast pane exited message to all clients
+      broadcastJsonToSession(sessionId, {
         type: 'paneExited',
         payload: { paneId, exitCode },
-      };
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify(message));
-      }
+      });
     },
     onTitleChange: (paneId, title) => {
       // Update pane title in DB
       sessionService.updatePaneTitle(paneId, title);
 
-      // Send paneTitleChanged message to client
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'paneTitleChanged',
-          payload: { paneId, title },
-        }));
-      }
+      // Broadcast paneTitleChanged to all clients
+      broadcastJsonToSession(sessionId, {
+        type: 'paneTitleChanged',
+        payload: { paneId, title },
+      });
 
       // If the pane's window has auto-rename enabled, update the window name
       const pane = sessionService.getPane(paneId);
@@ -371,12 +367,10 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         const window = sessionService.getWindow(pane.windowId);
         if (window && window.autoRename) {
           sessionService.renameWindow(window.id, title);
-          if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'windowRenamed',
-              payload: { windowId: window.id, name: title },
-            }));
-          }
+          broadcastJsonToSession(sessionId, {
+            type: 'windowRenamed',
+            payload: { windowId: window.id, name: title },
+          });
         }
       }
     },
@@ -387,14 +381,14 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         const flags = getWindowFlags(ctx.windowId);
         if (!flags.bell) {
           flags.bell = true;
-          if (ws.readyState === ws.OPEN) {
-            sendActivityAlert(
-              ws,
-              ctx.windowId,
-              'bell',
-              `Bell in window '${ctx.windowName}'`
-            );
-          }
+          broadcastJsonToSession(sessionId, {
+            type: 'activityAlert',
+            payload: {
+              windowId: ctx.windowId,
+              alertType: 'bell',
+              message: `Bell in window '${ctx.windowName}'`,
+            },
+          });
         }
       }
     },
@@ -403,13 +397,24 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
   // Create client connection
   const client: ClientConnection = {
     ws,
+    clientId: randomUUID(),
     sessionId,
     terminalCtx,
     sessionCtx,
     isAlive: true,
+    readOnly: false,
+    connectedAt: Date.now(),
   };
 
-  serverState?.clients.set(sessionId, client);
+  // Add client to the session's connection set
+  if (serverState) {
+    let clientSet = serverState.clients.get(sessionId);
+    if (!clientSet) {
+      clientSet = new Set();
+      serverState.clients.set(sessionId, clientSet);
+    }
+    clientSet.add(client);
+  }
 
   // Set up WebSocket event handlers
   setupWebSocketHandlers(client);
@@ -425,12 +430,21 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     // The DB assigned its own IDs — update our sessionId mapping
     // We need to re-map the client connection to the DB session ID
     if (dbSession.id !== sessionId) {
-      serverState?.clients.delete(sessionId);
-      sessionId = dbSession.id;
-      client.sessionId = sessionId;
-      terminalCtx.sessionId = sessionId;
-      sessionCtx.sessionId = sessionId;
-      serverState?.clients.set(sessionId, client);
+      // Move the entire client set to the new session ID
+      const existingSet = serverState?.clients.get(sessionId);
+      if (existingSet) {
+        serverState?.clients.delete(sessionId);
+        sessionId = dbSession.id;
+        client.sessionId = sessionId;
+        terminalCtx.sessionId = sessionId;
+        sessionCtx.sessionId = sessionId;
+        serverState?.clients.set(sessionId, existingSet);
+      } else {
+        sessionId = dbSession.id;
+        client.sessionId = sessionId;
+        terminalCtx.sessionId = sessionId;
+        sessionCtx.sessionId = sessionId;
+      }
       // Re-send connected with the correct session ID
       sendConnected(ws, sessionId, {
         id: dbSession.id,
@@ -623,10 +637,15 @@ async function handleJsonMessage(
   switch (message.type) {
     // Heartbeat
     case 'pong': {
-      // Find the client for this context and mark as alive
-      const client = serverState?.clients.get(terminalCtx.sessionId);
-      if (client) {
-        client.isAlive = true;
+      // Find the specific client by ws reference and mark as alive
+      const clientSet = serverState?.clients.get(terminalCtx.sessionId);
+      if (clientSet) {
+        for (const c of clientSet) {
+          if (c.ws === terminalCtx.ws) {
+            c.isAlive = true;
+            break;
+          }
+        }
       }
       return;
     }
@@ -654,6 +673,7 @@ async function handleJsonMessage(
     // Session operations
     case 'createWindow':
       await handleCreateWindow(sessionCtx, message);
+      fireHooks('after-new-window', terminalCtx.sessionId, terminalCtx.windowId ?? '', terminalCtx.focusedPaneId ?? '');
       break;
     case 'closeWindow': {
       // Clean up silence timer and flags for the closed window
@@ -665,6 +685,7 @@ async function handleJsonMessage(
       }
       windowFlags.delete(closingWindowId);
       await handleCloseWindow(sessionCtx, message);
+      fireHooks('after-kill-window', terminalCtx.sessionId, closingWindowId, terminalCtx.focusedPaneId ?? '');
       break;
     }
     case 'switchWindow':
@@ -732,10 +753,20 @@ async function handleJsonMessage(
           // Close the WebSocket gracefully after a short delay so the
           // sessionDetached message has time to be sent.
           setTimeout(() => {
-            const client = serverState?.clients.get(terminalCtx.sessionId);
-            if (client) {
-              client.ws.close(1000, 'Client detached');
-              serverState?.clients.delete(terminalCtx.sessionId);
+            const detachSet = serverState?.clients.get(terminalCtx.sessionId);
+            if (detachSet) {
+              // Find and remove only the requesting client
+              for (const c of detachSet) {
+                if (c.ws === terminalCtx.ws) {
+                  c.ws.close(1000, 'Client detached');
+                  detachSet.delete(c);
+                  break;
+                }
+              }
+              // Clean up empty set
+              if (detachSet.size === 0) {
+                serverState?.clients.delete(terminalCtx.sessionId);
+              }
             }
           }, 100);
           break;
@@ -768,6 +799,57 @@ async function handleJsonMessage(
               },
             });
           }
+          break;
+        }
+
+        if (result.output.startsWith('__CHOOSE_TREE__:')) {
+          // Trigger choose-tree data flow (same as requestChooseTree)
+          const allSessions = sessionService.getAllSessions();
+          const connectedSessionIds = new Set(getConnectedSessions());
+
+          const sessions = allSessions.map((s) => {
+            const fullSession = sessionService.getSession(s.id);
+            const windows = (fullSession?.windows ?? []).map((win) => {
+              const paneIds = getPaneIds(win.layout);
+              const panes = win.panes.map((pane, idx) => ({
+                id: pane.id,
+                index: idx,
+                active: pane.id === (paneIds[0] ?? ''),
+                title: pane.title || pane.shell,
+                currentCommand: pane.currentCommand,
+                size: `${String(pane.cols)}x${String(pane.rows)}`,
+              }));
+
+              return {
+                id: win.id,
+                index: win.index,
+                name: win.name,
+                active: win.id === fullSession?.activeWindowId,
+                panes,
+              };
+            });
+
+            return {
+              id: s.id,
+              name: s.name,
+              attached: connectedSessionIds.has(s.id) ? 1 : 0,
+              windows,
+            };
+          });
+
+          sendJson(terminalCtx.ws, {
+            type: 'chooseTreeData',
+            payload: { sessions },
+          });
+          break;
+        }
+
+        if (result.output.startsWith('__CHOOSE_BUFFER__:')) {
+          const data = result.output.slice('__CHOOSE_BUFFER__:'.length);
+          sendJson(terminalCtx.ws, {
+            type: 'commandResult',
+            payload: { output: `CHOOSE_BUFFER:${data}`, success: true },
+          });
           break;
         }
 
@@ -872,34 +954,42 @@ async function handleJsonMessage(
 function handleDisconnect(client: ClientConnection, code: number, reason: string): void {
   const { sessionId, terminalCtx } = client;
 
-  logger.info('Client disconnected', { sessionId, code, reason });
+  logger.info('Client disconnected', { sessionId, clientId: client.clientId, code, reason });
 
-  // Buffer output for potential reconnection
-  if (terminalCtx.outputBuffers.size > 0) {
-    const buffer: DisconnectedBuffer = {
-      sessionId,
-      data: new Map(),
-      disconnectedAt: Date.now(),
-    };
+  // Remove this specific client from the session's set
+  const clientSet = serverState?.clients.get(sessionId);
+  if (clientSet) {
+    clientSet.delete(client);
+    // If no more clients in this session, clean up the set entry
+    if (clientSet.size === 0) {
+      serverState?.clients.delete(sessionId);
 
-    for (const [paneId, outputBuffer] of terminalCtx.outputBuffers) {
-      buffer.data.set(paneId, [...outputBuffer.data]);
+      // Buffer output for potential reconnection (only when last client leaves)
+      if (terminalCtx.outputBuffers.size > 0) {
+        const buffer: DisconnectedBuffer = {
+          sessionId,
+          data: new Map(),
+          disconnectedAt: Date.now(),
+        };
+
+        for (const [paneId, outputBuffer] of terminalCtx.outputBuffers) {
+          buffer.data.set(paneId, [...outputBuffer.data]);
+        }
+
+        serverState?.disconnectedBuffers.set(sessionId, buffer);
+        logger.debug('Buffered output for reconnection', { sessionId, paneCount: buffer.data.size });
+      }
+
+      // Set timeout to clean up disconnected buffer
+      setTimeout(() => {
+        const buffer = serverState?.disconnectedBuffers.get(sessionId);
+        if (buffer && Date.now() - buffer.disconnectedAt > config.ptyBufferSize * 1000) {
+          serverState?.disconnectedBuffers.delete(sessionId);
+          logger.debug('Cleaned up disconnected buffer', { sessionId });
+        }
+      }, config.ptyBufferSize * 1000);
     }
-
-    serverState?.disconnectedBuffers.set(sessionId, buffer);
-    logger.debug('Buffered output for reconnection', { sessionId, paneCount: buffer.data.size });
   }
-
-  serverState?.clients.delete(sessionId);
-
-  // Set timeout to clean up disconnected buffer
-  setTimeout(() => {
-    const buffer = serverState?.disconnectedBuffers.get(sessionId);
-    if (buffer && Date.now() - buffer.disconnectedAt > config.ptyBufferSize * 1000) {
-      serverState?.disconnectedBuffers.delete(sessionId);
-      logger.debug('Cleaned up disconnected buffer', { sessionId });
-    }
-  }, config.ptyBufferSize * 1000);
 }
 
 /**
@@ -909,20 +999,27 @@ function startHeartbeat(): void {
   if (!serverState) return;
 
   serverState.heartbeatInterval = setInterval(() => {
-    serverState?.clients.forEach((client, sessionId) => {
-      if (!client.isAlive) {
-        // Client didn't respond to the previous ping — terminate
-        logger.warn('Client heartbeat timeout', { sessionId });
-        client.ws.terminate();
-        serverState?.clients.delete(sessionId);
-        return;
+    serverState?.clients.forEach((clientSet, sessionId) => {
+      for (const client of clientSet) {
+        if (!client.isAlive) {
+          // Client didn't respond to the previous ping — terminate
+          logger.warn('Client heartbeat timeout', { sessionId, clientId: client.clientId });
+          client.ws.terminate();
+          clientSet.delete(client);
+          continue;
+        }
+
+        // Mark as dead; the pong handler will set it back to true
+        client.isAlive = false;
+        // Send application-level ping (works through proxies like Vite dev server)
+        if (client.ws.readyState === client.ws.OPEN) {
+          client.ws.send(JSON.stringify({ type: 'ping' }));
+        }
       }
 
-      // Mark as dead; the pong handler will set it back to true
-      client.isAlive = false;
-      // Send application-level ping (works through proxies like Vite dev server)
-      if (client.ws.readyState === client.ws.OPEN) {
-        client.ws.send(JSON.stringify({ type: 'ping' }));
+      // Clean up empty sets
+      if (clientSet.size === 0) {
+        serverState?.clients.delete(sessionId);
       }
     });
   }, config.wsHeartbeatInterval);
@@ -939,6 +1036,40 @@ function stopHeartbeat(): void {
     serverState.heartbeatInterval = null;
     logger.debug('Heartbeat stopped');
   }
+}
+
+/**
+ * Broadcast a JSON message to ALL clients in a session
+ */
+function broadcastJsonToSession(sessionId: string, message: object): void {
+  const clientSet = serverState?.clients.get(sessionId);
+  if (!clientSet) return;
+  const json = JSON.stringify(message);
+  for (const client of clientSet) {
+    if (client.ws.readyState === client.ws.OPEN) {
+      client.ws.send(json);
+    }
+  }
+}
+
+/**
+ * Broadcast a pre-encoded binary message to ALL clients in a session
+ */
+function broadcastBinaryToSession(sessionId: string, data: Uint8Array): void {
+  const clientSet = serverState?.clients.get(sessionId);
+  if (!clientSet) return;
+  for (const client of clientSet) {
+    if (client.ws.readyState === client.ws.OPEN) {
+      client.ws.send(data);
+    }
+  }
+}
+
+/**
+ * Broadcast a JSON message to all clients in a session (public API)
+ */
+export function broadcastToSession(sessionId: string, message: object): void {
+  broadcastJsonToSession(sessionId, message);
 }
 
 /**
@@ -988,17 +1119,42 @@ function sendWindowCreated(ws: WebSocket, window: WindowWithPanes): void {
 }
 
 /**
- * Send output to a specific session's client
+ * Fire hooks for a lifecycle event.
+ * Each hook command is parsed and executed via CommandService.
+ */
+function fireHooks(event: string, sessionId: string, windowId: string, paneId: string): void {
+  const commands = hookService.fire(event);
+  for (const cmd of commands) {
+    const parseResult = defaultRegistry.parse(cmd);
+    if (!parseResult.ok) {
+      logger.warn(`Hook command parse error for "${event}": ${parseResult.error}`);
+      continue;
+    }
+    commandService.execute(parseResult.value, { sessionId, windowId, paneId });
+  }
+}
+
+/**
+ * Send output to all clients connected to a session
  */
 export function sendOutputToSession(sessionId: string, paneId: string, data: Uint8Array): boolean {
-  const client = serverState?.clients.get(sessionId);
+  const clientSet = serverState?.clients.get(sessionId);
+  let sent = false;
 
-  if (client && client.ws.readyState === client.ws.OPEN) {
-    sendBinaryOutput(client.ws, paneId, data);
+  if (clientSet) {
+    for (const client of clientSet) {
+      if (client.ws.readyState === client.ws.OPEN) {
+        sendBinaryOutput(client.ws, paneId, data);
+        sent = true;
+      }
+    }
+  }
+
+  if (sent) {
     return true;
   }
 
-  // Buffer output for disconnected client
+  // Buffer output for disconnected session (no live clients)
   let buffer = serverState?.disconnectedBuffers.get(sessionId);
   if (!buffer) {
     buffer = {
@@ -1020,10 +1176,31 @@ export function sendOutputToSession(sessionId: string, paneId: string, data: Uin
 }
 
 /**
- * Get client connection for a session
+ * Get the first client connection for a session (or a specific one by clientId)
  */
-export function getClient(sessionId: string): ClientConnection | undefined {
-  return serverState?.clients.get(sessionId);
+export function getClient(sessionId: string, clientId?: string): ClientConnection | undefined {
+  const clientSet = serverState?.clients.get(sessionId);
+  if (!clientSet) return undefined;
+  if (clientId) {
+    for (const client of clientSet) {
+      if (client.clientId === clientId) return client;
+    }
+    return undefined;
+  }
+  // Return the first client in the set
+  for (const client of clientSet) {
+    return client;
+  }
+  return undefined;
+}
+
+/**
+ * Get all client connections for a session
+ */
+export function getSessionClients(sessionId: string): ClientConnection[] {
+  const clientSet = serverState?.clients.get(sessionId);
+  if (!clientSet) return [];
+  return Array.from(clientSet);
 }
 
 /**
@@ -1049,8 +1226,10 @@ export function closeWebSocketServer(): Promise<void> {
 
     if (serverState?.wss) {
       // Close all connections
-      serverState.clients.forEach((client) => {
-        client.ws.close(1000, 'Server shutting down');
+      serverState.clients.forEach((clientSet) => {
+        for (const client of clientSet) {
+          client.ws.close(1000, 'Server shutting down');
+        }
       });
       serverState.clients.clear();
 
