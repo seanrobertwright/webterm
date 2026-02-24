@@ -1,4 +1,3 @@
-import type { CommandDef } from '../types/models.ts';
 import { CommandRegistry } from './command-registry.js';
 
 /** Pre-configured registry with all tmux-compatible commands */
