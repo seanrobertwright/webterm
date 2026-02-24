@@ -50,6 +50,13 @@ defaultRegistry
     description: 'List all sessions',
     flags: [],
     args: [],
+  })
+  .register({
+    name: 'list-clients',
+    aliases: ['lsc'],
+    description: 'List connected clients',
+    flags: [],
+    args: [],
   });
 
 // ============================================================================

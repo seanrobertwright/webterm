@@ -30,6 +30,7 @@ import {
 import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
 import type { ParsedCommand } from '../../../shared/tmux/command-registry.js';
 import type { OptionScope, PresetLayoutName, SplitDirection } from '../../../shared/types/models.js';
+import { getConnectedSessions, getSessionClients } from '../api/websocket-server.js';
 
 /**
  * Module-level map tracking which preset layout index each window is currently at.
@@ -78,6 +79,8 @@ export class CommandService {
           return this.handleSwitchClient(parsed, ctx);
         case 'list-sessions':
           return this.handleListSessions();
+        case 'list-clients':
+          return this.handleListClients();
 
         // ================================================================
         // Window commands
@@ -298,6 +301,48 @@ export class CommandService {
         const created = new Date(s.createdAt).toISOString().slice(0, 19).replace('T', ' ');
         return `${s.name}: ${s.windowCount} windows (created ${created})`;
       });
+
+      return { output: lines.join('\n'), success: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { output: message, success: false };
+    }
+  }
+
+  /**
+   * list-clients: List all connected clients with session, read-only flag, and duration.
+   */
+  private handleListClients(): CommandResult {
+    try {
+      const sessionIds = getConnectedSessions();
+
+      if (sessionIds.length === 0) {
+        return { output: 'No clients.', success: true };
+      }
+
+      const lines: string[] = [];
+
+      for (const sessionId of sessionIds) {
+        const session = sessionService.getSession(sessionId);
+        const sessionName = session?.name ?? 'unknown';
+        const clients = getSessionClients(sessionId);
+
+        for (const client of clients) {
+          const durationMs = Date.now() - client.connectedAt;
+          const durationSec = Math.floor(durationMs / 1000);
+          const hours = Math.floor(durationSec / 3600);
+          const minutes = Math.floor((durationSec % 3600) / 60);
+          const seconds = durationSec % 60;
+          const duration = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+          const flags = client.readOnly ? ' (ro)' : '';
+
+          lines.push(`${client.clientId}: ${sessionName} [${duration}]${flags}`);
+        }
+      }
+
+      if (lines.length === 0) {
+        return { output: 'No clients.', success: true };
+      }
 
       return { output: lines.join('\n'), success: true };
     } catch (err) {

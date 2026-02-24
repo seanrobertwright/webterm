@@ -50,7 +50,7 @@ import type {
 import type { Session } from '@webterm/shared/models';
 
 /** Client connection state */
-interface ClientConnection {
+export interface ClientConnection {
   ws: WebSocket;
   clientId: string;
   sessionId: string;
