@@ -1,7 +1,33 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { Layout, Pane, ConnectionState } from '@webterm/shared/models';
 import { TerminalPane } from '../terminal/TerminalPane';
 import { PaneSplitter } from './PaneSplitter';
+import { ContextMenu } from '../ContextMenu';
+import type { ContextMenuItem } from '../ContextMenu';
+
+// ============================================================================
+// Default context menu items
+// ============================================================================
+
+const DEFAULT_CONTEXT_MENU_ITEMS: ContextMenuItem[] = [
+  { label: 'Split Horizontally', command: 'split-h', shortcut: 'Prefix "' },
+  { label: 'Split Vertically', command: 'split-v', shortcut: 'Prefix %' },
+  { label: 'Close Pane', command: 'close', shortcut: 'Prefix x' },
+  { label: 'Zoom Pane', command: 'zoom', shortcut: 'Prefix z' },
+  { label: 'Copy', command: 'copy' },
+  { label: 'Paste', command: 'paste' },
+  { label: 'Mark Pane', command: 'mark', shortcut: 'Prefix m' },
+];
+
+// ============================================================================
+// Context menu state
+// ============================================================================
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  paneId: string;
+}
 
 export interface PaneContainerProps {
   /** Layout tree structure */
@@ -24,6 +50,8 @@ export interface PaneContainerProps {
   onPaneRestart?: (paneId: string) => void;
   /** Callback when layout sizes change due to splitter drag */
   onLayoutResize?: (path: number[], sizes: number[]) => void;
+  /** Callback when a context menu command is selected */
+  onContextMenuCommand?: (paneId: string, command: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -38,6 +66,7 @@ interface LayoutNodeProps {
   onPaneFocus?: (paneId: string) => void;
   onPaneRestart?: (paneId: string) => void;
   onLayoutResize?: (path: number[], sizes: number[]) => void;
+  onPaneContextMenu?: (paneId: string, x: number, y: number) => void;
   className?: string;
   /** Path to this node in the layout tree */
   path: number[];
@@ -54,6 +83,7 @@ function LayoutNode({
   onPaneFocus,
   onPaneRestart,
   onLayoutResize,
+  onPaneContextMenu,
   path,
   className = '',
 }: LayoutNodeProps) {
@@ -127,7 +157,16 @@ function LayoutNode({
       terminalProps.broadcastMode = true;
     }
 
-    return <TerminalPane {...terminalProps} />;
+    const handleContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      onPaneContextMenu?.(pane.id, e.clientX, e.clientY);
+    };
+
+    return (
+      <div className="w-full h-full" onContextMenu={handleContextMenu}>
+        <TerminalPane {...terminalProps} />
+      </div>
+    );
   }
 
   // Split node: render children with splitters
@@ -178,6 +217,9 @@ function LayoutNode({
           if (onLayoutResize !== undefined) {
             layoutNodeProps.onLayoutResize = onLayoutResize;
           }
+          if (onPaneContextMenu !== undefined) {
+            layoutNodeProps.onPaneContextMenu = onPaneContextMenu;
+          }
 
           return (
             <div
@@ -217,7 +259,10 @@ function LayoutNode({
 
 /** Recursive layout renderer for pane container */
 export function PaneContainer(props: PaneContainerProps) {
-  const { layout, panes, zoomedPaneId, className = '', ...rest } = props;
+  const { layout, panes, zoomedPaneId, onContextMenuCommand, className = '', ...rest } = props;
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   // Convert panes array to map if needed, with null/undefined check
   const panesMap = useMemo(() => {
@@ -232,6 +277,24 @@ export function PaneContainer(props: PaneContainerProps) {
     }
   }, [panes]);
 
+  const handlePaneContextMenu = useCallback((paneId: string, x: number, y: number) => {
+    setContextMenu({ paneId, x, y });
+  }, []);
+
+  const handleContextMenuSelect = useCallback(
+    (command: string) => {
+      if (contextMenu) {
+        onContextMenuCommand?.(contextMenu.paneId, command);
+      }
+      setContextMenu(null);
+    },
+    [contextMenu, onContextMenuCommand],
+  );
+
+  const handleContextMenuClose = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
   // Zoom mode: render only the zoomed pane at 100%
   if (zoomedPaneId) {
     const zoomedLayout: Layout = { type: 'leaf', paneId: zoomedPaneId };
@@ -245,9 +308,20 @@ export function PaneContainer(props: PaneContainerProps) {
     if (rest.onPaneResize) zoomedProps.onPaneResize = rest.onPaneResize;
     if (rest.onPaneFocus) zoomedProps.onPaneFocus = rest.onPaneFocus;
     if (rest.onPaneRestart) zoomedProps.onPaneRestart = rest.onPaneRestart;
+    zoomedProps.onPaneContextMenu = handlePaneContextMenu;
     return (
       <div className={`w-full h-full overflow-hidden ${className}`}>
         <LayoutNode {...zoomedProps} />
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            paneId={contextMenu.paneId}
+            items={DEFAULT_CONTEXT_MENU_ITEMS}
+            onSelect={handleContextMenuSelect}
+            onClose={handleContextMenuClose}
+          />
+        )}
       </div>
     );
   }
@@ -258,8 +332,19 @@ export function PaneContainer(props: PaneContainerProps) {
         layout={layout}
         panes={panesMap}
         path={[]}
+        onPaneContextMenu={handlePaneContextMenu}
         {...rest}
       />
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          paneId={contextMenu.paneId}
+          items={DEFAULT_CONTEXT_MENU_ITEMS}
+          onSelect={handleContextMenuSelect}
+          onClose={handleContextMenuClose}
+        />
+      )}
     </div>
   );
 }

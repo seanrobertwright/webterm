@@ -152,10 +152,21 @@ function App() {
     [activePane, layout, panes, sendMessage, sessionId, setActivePane, toggleZoom, windows, activeWindowId, setActiveWindow, copySelection, pasteToPane, sendInput]
   );
 
+  // Handle server-side tmux command execution from keybindings
+  const handleKeybindingCommand = useCallback(
+    (command: string) => {
+      sendMessage({ type: 'executeCommand', payload: { command } });
+    },
+    [sendMessage]
+  );
+
   // Initialize keybindings with action handler
   const keybindingOptions: UseKeyBindingsOptions = useMemo(
-    () => ({ onAction: handleKeybindingAction }),
-    [handleKeybindingAction]
+    () => ({
+      onAction: handleKeybindingAction,
+      onCommand: handleKeybindingCommand,
+    }),
+    [handleKeybindingAction, handleKeybindingCommand]
   );
   useKeyBindings(keybindingOptions);
 
@@ -261,6 +272,43 @@ function App() {
     }
   }, []);
 
+  // Handle context menu command from pane right-click
+  const handleContextMenuCommand = useCallback(
+    (paneId: string, command: string) => {
+      switch (command) {
+        case 'split-h':
+          sendMessage({ type: 'split', payload: { paneId, direction: 'h' } });
+          break;
+        case 'split-v':
+          sendMessage({ type: 'split', payload: { paneId, direction: 'v' } });
+          break;
+        case 'close':
+          sendMessage({ type: 'close', payload: { paneId } });
+          break;
+        case 'zoom':
+          toggleZoom(paneId);
+          break;
+        case 'copy':
+          copySelection(paneId).then((result) => {
+            if (result.success) {
+              setClipboardNotification(result.fallback ? 'Copied to in-app clipboard' : 'Copied');
+            }
+          });
+          break;
+        case 'paste':
+          pasteToPane(paneId, sendInput);
+          break;
+        case 'mark':
+          sendMessage({ type: 'executeCommand', payload: { command: 'select-pane -m' } });
+          break;
+        default:
+          sendMessage({ type: 'executeCommand', payload: { command } });
+          break;
+      }
+    },
+    [sendMessage, toggleZoom, copySelection, pasteToPane, sendInput],
+  );
+
   // Don't render layout until it's loaded
   if (!layout) {
     return (
@@ -298,6 +346,7 @@ function App() {
             onPaneData={handlePaneData}
             onPaneResize={handlePaneResize}
             onPaneFocus={handlePaneFocus}
+            onContextMenuCommand={handleContextMenuCommand}
           />
           {connectionState === 'disconnected' && (
             <DisconnectionOverlay isVisible={true} />
