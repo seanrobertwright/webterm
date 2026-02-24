@@ -6,6 +6,38 @@ import { ContextMenu } from '../ContextMenu';
 import type { ContextMenuItem } from '../ContextMenu';
 
 // ============================================================================
+// Pane border color mapping (tmux-compatible color names)
+// ============================================================================
+
+const TMUX_COLOR_MAP: Record<string, string> = {
+  black: '#000000',
+  red: '#cc0000',
+  green: '#4e9a06',
+  yellow: '#c4a000',
+  blue: '#3465a4',
+  magenta: '#75507b',
+  cyan: '#06989a',
+  white: '#d3d7cf',
+  default: '#4b5563', // gray-600
+};
+
+/**
+ * Parse a tmux-style border option value like "fg=blue" or "fg=green"
+ * and return a CSS color string.
+ */
+function parseBorderStyle(style: string): string {
+  // Handle "fg=colorname" format
+  const fgMatch = /fg=(\w+)/.exec(style);
+  if (fgMatch?.[1]) {
+    const colorName = fgMatch[1].toLowerCase();
+    return TMUX_COLOR_MAP[colorName] ?? TMUX_COLOR_MAP['default'] ?? '#4b5563';
+  }
+  // Handle bare color name
+  const bare = style.trim().toLowerCase();
+  return TMUX_COLOR_MAP[bare] ?? TMUX_COLOR_MAP['default'] ?? '#4b5563';
+}
+
+// ============================================================================
 // Default context menu items
 // ============================================================================
 
@@ -52,6 +84,12 @@ export interface PaneContainerProps {
   onLayoutResize?: (path: number[], sizes: number[]) => void;
   /** Callback when a context menu command is selected */
   onContextMenuCommand?: (paneId: string, command: string) => void;
+  /** Pane border style for inactive panes (tmux format, e.g. "fg=gray" or color name) */
+  paneBorderStyle?: string;
+  /** Pane border style for the active pane (tmux format, e.g. "fg=green" or color name) */
+  paneActiveBorderStyle?: string;
+  /** Pane border status position: "top", "bottom", or "off" */
+  paneBorderStatus?: 'top' | 'bottom' | 'off';
   /** Additional CSS classes */
   className?: string;
 }
@@ -67,6 +105,12 @@ interface LayoutNodeProps {
   onPaneRestart?: (paneId: string) => void;
   onLayoutResize?: (path: number[], sizes: number[]) => void;
   onPaneContextMenu?: (paneId: string, x: number, y: number) => void;
+  /** CSS color for inactive pane borders */
+  borderColor?: string | undefined;
+  /** CSS color for the active pane border */
+  activeBorderColor?: string | undefined;
+  /** Pane border status position */
+  paneBorderStatus?: 'top' | 'bottom' | 'off' | undefined;
   className?: string;
   /** Path to this node in the layout tree */
   path: number[];
@@ -84,6 +128,9 @@ function LayoutNode({
   onPaneRestart,
   onLayoutResize,
   onPaneContextMenu,
+  borderColor,
+  activeBorderColor,
+  paneBorderStatus,
   path,
   className = '',
 }: LayoutNodeProps) {
@@ -162,8 +209,32 @@ function LayoutNode({
       onPaneContextMenu?.(pane.id, e.clientX, e.clientY);
     };
 
+    const isActive = activePaneId === pane.id;
+    const currentBorderColor = isActive
+      ? (activeBorderColor ?? '#22c55e')  // green-500 default
+      : (borderColor ?? '#4b5563');        // gray-600 default
+
+    const borderLabel = paneBorderStatus !== 'off' && paneBorderStatus !== undefined
+      ? (pane.title ?? pane.currentCommand ?? `pane ${pane.id.slice(0, 8)}`)
+      : null;
+
     return (
-      <div className="w-full h-full" onContextMenu={handleContextMenu}>
+      <div
+        className="w-full h-full relative"
+        style={{ border: `2px solid ${currentBorderColor}` }}
+        onContextMenu={handleContextMenu}
+      >
+        {/* Pane border label */}
+        {borderLabel && (
+          <div
+            className={`absolute left-2 z-10 max-w-[50%] truncate rounded px-1.5 py-0.5 text-xs font-mono ${
+              isActive ? 'bg-green-900/80 text-green-300' : 'bg-gray-800/80 text-gray-400'
+            }`}
+            style={paneBorderStatus === 'bottom' ? { bottom: -1 } : { top: -1 }}
+          >
+            {borderLabel}
+          </div>
+        )}
         <TerminalPane {...terminalProps} />
       </div>
     );
@@ -220,6 +291,15 @@ function LayoutNode({
           if (onPaneContextMenu !== undefined) {
             layoutNodeProps.onPaneContextMenu = onPaneContextMenu;
           }
+          if (borderColor !== undefined) {
+            layoutNodeProps.borderColor = borderColor;
+          }
+          if (activeBorderColor !== undefined) {
+            layoutNodeProps.activeBorderColor = activeBorderColor;
+          }
+          if (paneBorderStatus !== undefined) {
+            layoutNodeProps.paneBorderStatus = paneBorderStatus;
+          }
 
           return (
             <div
@@ -259,7 +339,21 @@ function LayoutNode({
 
 /** Recursive layout renderer for pane container */
 export function PaneContainer(props: PaneContainerProps) {
-  const { layout, panes, zoomedPaneId, onContextMenuCommand, className = '', ...rest } = props;
+  const {
+    layout,
+    panes,
+    zoomedPaneId,
+    onContextMenuCommand,
+    paneBorderStyle,
+    paneActiveBorderStyle,
+    paneBorderStatus = 'off',
+    className = '',
+    ...rest
+  } = props;
+
+  // Parse border style options into CSS colors
+  const borderColor = paneBorderStyle ? parseBorderStyle(paneBorderStyle) : undefined;
+  const activeBorderColor = paneActiveBorderStyle ? parseBorderStyle(paneActiveBorderStyle) : undefined;
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -309,6 +403,9 @@ export function PaneContainer(props: PaneContainerProps) {
     if (rest.onPaneFocus) zoomedProps.onPaneFocus = rest.onPaneFocus;
     if (rest.onPaneRestart) zoomedProps.onPaneRestart = rest.onPaneRestart;
     zoomedProps.onPaneContextMenu = handlePaneContextMenu;
+    if (borderColor !== undefined) zoomedProps.borderColor = borderColor;
+    if (activeBorderColor !== undefined) zoomedProps.activeBorderColor = activeBorderColor;
+    zoomedProps.paneBorderStatus = paneBorderStatus;
     return (
       <div className={`w-full h-full overflow-hidden ${className}`}>
         <LayoutNode {...zoomedProps} />
@@ -333,6 +430,9 @@ export function PaneContainer(props: PaneContainerProps) {
         panes={panesMap}
         path={[]}
         onPaneContextMenu={handlePaneContextMenu}
+        borderColor={borderColor}
+        activeBorderColor={activeBorderColor}
+        paneBorderStatus={paneBorderStatus}
         {...rest}
       />
       {contextMenu && (
