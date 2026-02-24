@@ -16,6 +16,7 @@ export interface Session {
   createdAt: number;
   updatedAt: number;
   activeWindowId: string | null;
+  lastWindowId: string | null;
 }
 
 /** Session with full details including windows */
@@ -30,6 +31,14 @@ export interface Window {
   name: string;
   index: number;
   createdAt: number;
+  autoRename: boolean;
+  lastActiveAt: number | null;
+  monitorActivity: boolean;
+  monitorSilence: number;
+  monitorBell: boolean;
+  activityFlag: boolean;
+  bellFlag: boolean;
+  silenceFlag: boolean;
 }
 
 /** Window with embedded layout and panes */
@@ -49,6 +58,9 @@ export interface Pane {
   connectionState: ConnectionState;
   exitCode: number | null;
   createdAt: number;
+  title: string;
+  marked: boolean;
+  currentCommand: string | null;
 }
 
 /** Layout tree node types */
@@ -86,3 +98,95 @@ export interface SessionListItem {
   windowCount: number;
   paneCount: number;
 }
+
+// ============================================================================
+// tmux Compatibility Entities
+// ============================================================================
+
+/** Paste buffer for copy/paste operations */
+export interface PasteBuffer {
+  name: string;
+  content: string;
+  size: number;
+  createdAt: number;
+}
+
+/** Key binding mapping a key in a table to a command */
+export interface KeyBinding {
+  id: string;
+  keyTable: string;
+  key: string;
+  command: string;
+  isDefault: boolean;
+  createdAt: number;
+}
+
+/** Configuration option with hierarchical scoping */
+export type OptionScope =
+  | 'server'
+  | 'global-session'
+  | 'global-window'
+  | 'global-pane'
+  | 'session'
+  | 'window'
+  | 'pane';
+
+export type OptionType = 'string' | 'number' | 'boolean' | 'choice' | 'color' | 'style';
+
+export interface Option {
+  id: string;
+  scope: OptionScope;
+  scopeId: string | null;
+  name: string;
+  value: string;
+  updatedAt: number;
+}
+
+/** Hook registered on a lifecycle event */
+export interface Hook {
+  id: string;
+  scope: 'global' | 'session';
+  scopeId: string | null;
+  eventName: string;
+  command: string;
+  ordering: number;
+  createdAt: number;
+}
+
+/** Command definition in the registry */
+export interface FlagDef {
+  short: string;
+  takesValue: boolean;
+  description: string;
+}
+
+export interface ArgDef {
+  name: string;
+  required: boolean;
+  completionKind?: 'session' | 'window' | 'pane' | 'command' | 'option' | 'file';
+}
+
+export interface CommandDef {
+  name: string;
+  aliases: string[];
+  description: string;
+  flags: FlagDef[];
+  args: ArgDef[];
+}
+
+/** Format variable resolver context */
+export interface FormatContext {
+  session?: Session;
+  window?: Window;
+  pane?: Pane;
+  clientWidth?: number;
+  clientHeight?: number;
+}
+
+/** Preset layout names */
+export type PresetLayoutName =
+  | 'even-horizontal'
+  | 'even-vertical'
+  | 'main-horizontal'
+  | 'main-vertical'
+  | 'tiled';

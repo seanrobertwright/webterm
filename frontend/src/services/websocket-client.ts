@@ -254,6 +254,14 @@ export class WebSocketClient {
     });
   }
 
+  /** Send a tmux command for execution */
+  sendExecuteCommand(command: string): void {
+    this.sendJson({
+      type: 'executeCommand',
+      payload: { command },
+    });
+  }
+
   /** Send yank-to-buffer message (copy mode yank) */
   sendYankToBuffer(content: string, bufferName?: string): void {
     const payload: { content: string; bufferName?: string } = { content };

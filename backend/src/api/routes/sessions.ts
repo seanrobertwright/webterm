@@ -158,6 +158,7 @@ export async function handleCreateSession(
     createdAt: now,
     updatedAt: now,
     activeWindowId: null,
+    lastWindowId: null,
     windows: [],
   };
 
@@ -172,6 +173,7 @@ export async function handleCreateSession(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     activeWindowId: session.activeWindowId,
+    lastWindowId: session.lastWindowId,
   };
 
   sendJson(res, 201, response);
@@ -230,6 +232,7 @@ export async function handleUpdateSession(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     activeWindowId: session.activeWindowId,
+    lastWindowId: session.lastWindowId,
   };
 
   sendJson(res, 200, response);

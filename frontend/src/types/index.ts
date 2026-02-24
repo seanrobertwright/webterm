@@ -59,7 +59,10 @@ export type KeybindingAction =
   | { type: 'saveSession' }
   | { type: 'showHelp' }
   | { type: 'copy' }
-  | { type: 'paste' };
+  | { type: 'paste' }
+  | { type: 'commandPrompt' }
+  | { type: 'copyMode' }
+  | { type: 'pasteBuffer' };
 
 /** Keybinding configuration */
 export interface KeyBinding {

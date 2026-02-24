@@ -41,6 +41,11 @@ interface WindowRow {
   idx: number;
   layout: string;
   created_at: number;
+  auto_rename: number;
+  last_active_at: number | null;
+  monitor_activity: number;
+  monitor_silence: number;
+  monitor_bell: number;
 }
 
 /**
@@ -56,6 +61,7 @@ export function createSession(options: CreateSessionOptions): Session {
     createdAt: now,
     updatedAt: now,
     activeWindowId: null,
+    lastWindowId: null,
   };
 }
 
@@ -138,7 +144,8 @@ export function getSessionWithWindows(sessionId: string): SessionWithWindows | n
   }
 
   const windowRows = db.prepare(`
-    SELECT id, session_id, name, idx, layout, created_at
+    SELECT id, session_id, name, idx, layout, created_at,
+           auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
     FROM windows WHERE session_id = ? ORDER BY idx
   `).all(sessionId) as WindowRow[];
 
@@ -150,6 +157,7 @@ export function getSessionWithWindows(sessionId: string): SessionWithWindows | n
     createdAt: sessionRow.created_at,
     updatedAt: sessionRow.updated_at,
     activeWindowId: sessionRow.active_window_id,
+    lastWindowId: null,
     windows,
   };
 }
@@ -211,6 +219,7 @@ export function insertSession(name: string): Session {
     createdAt: now,
     updatedAt: now,
     activeWindowId: null,
+    lastWindowId: null,
   };
 }
 
@@ -318,6 +327,7 @@ export function rowToSession(row: SessionRow): Session {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     activeWindowId: row.active_window_id,
+    lastWindowId: null,
   };
 }
 

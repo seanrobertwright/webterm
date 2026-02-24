@@ -36,6 +36,11 @@ interface WindowRow {
   idx: number;
   layout: string;
   created_at: number;
+  auto_rename: number;
+  last_active_at: number | null;
+  monitor_activity: number;
+  monitor_silence: number;
+  monitor_bell: number;
 }
 
 interface PaneRow {
@@ -48,6 +53,8 @@ interface PaneRow {
   connection_state: string;
   exit_code: number | null;
   created_at: number;
+  title: string;
+  marked: number;
 }
 
 /**
@@ -66,6 +73,14 @@ export function createWindow(options: CreateWindowOptions, initialPaneId?: strin
     name: name.substring(0, WINDOW_CONSTRAINTS.MAX_NAME_LENGTH),
     index,
     createdAt: Date.now(),
+    autoRename: true,
+    lastActiveAt: null,
+    monitorActivity: false,
+    monitorSilence: 0,
+    monitorBell: true,
+    activityFlag: false,
+    bellFlag: false,
+    silenceFlag: false,
   };
 }
 
@@ -127,7 +142,8 @@ export function getWindowById(windowId: string): WindowWithPanes | null {
   const db = getDatabase();
 
   const row = db.prepare(`
-    SELECT id, session_id, name, idx, layout, created_at
+    SELECT id, session_id, name, idx, layout, created_at,
+           auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
     FROM windows WHERE id = ?
   `).get(windowId) as WindowRow | undefined;
 
@@ -145,7 +161,8 @@ export function getWindowsBySessionId(sessionId: string): WindowWithPanes[] {
   const db = getDatabase();
 
   const rows = db.prepare(`
-    SELECT id, session_id, name, idx, layout, created_at
+    SELECT id, session_id, name, idx, layout, created_at,
+           auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
     FROM windows WHERE session_id = ? ORDER BY idx
   `).all(sessionId) as WindowRow[];
 
@@ -185,6 +202,14 @@ export function insertWindow(
     name,
     index: idx,
     createdAt: now,
+    autoRename: true,
+    lastActiveAt: null,
+    monitorActivity: false,
+    monitorSilence: 0,
+    monitorBell: true,
+    activityFlag: false,
+    bellFlag: false,
+    silenceFlag: false,
   };
 }
 
@@ -312,6 +337,14 @@ export function rowToWindow(row: WindowRow): Window {
     name: row.name,
     index: row.idx,
     createdAt: row.created_at,
+    autoRename: Boolean(row.auto_rename ?? 1),
+    lastActiveAt: row.last_active_at ?? null,
+    monitorActivity: Boolean(row.monitor_activity),
+    monitorSilence: row.monitor_silence ?? 0,
+    monitorBell: Boolean(row.monitor_bell ?? 1),
+    activityFlag: false,
+    bellFlag: false,
+    silenceFlag: false,
   };
 }
 
@@ -322,7 +355,8 @@ export function rowToWindowWithPanes(row: WindowRow): WindowWithPanes {
   const db = getDatabase();
 
   const paneRows = db.prepare(`
-    SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at
+    SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+           title, marked
     FROM panes WHERE window_id = ?
   `).all(row.id) as PaneRow[];
 
@@ -337,5 +371,13 @@ export function rowToWindowWithPanes(row: WindowRow): WindowWithPanes {
     layout,
     panes,
     createdAt: row.created_at,
+    autoRename: Boolean(row.auto_rename ?? 1),
+    lastActiveAt: row.last_active_at ?? null,
+    monitorActivity: Boolean(row.monitor_activity),
+    monitorSilence: row.monitor_silence ?? 0,
+    monitorBell: Boolean(row.monitor_bell ?? 1),
+    activityFlag: false,
+    bellFlag: false,
+    silenceFlag: false,
   };
 }

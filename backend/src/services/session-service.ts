@@ -394,6 +394,17 @@ export class SessionService {
   }
 
   /**
+   * Update a pane's title
+   */
+  updatePaneTitle(paneId: string, title: string): boolean {
+    const db = getDatabase();
+    const result = db.prepare(`
+      UPDATE panes SET title = ? WHERE id = ?
+    `).run(title, paneId);
+    return result.changes > 0;
+  }
+
+  /**
    * Create a new window in a session
    */
   createWindow(sessionId: string, name: string, shell: ShellType = 'default', cwd?: string): WindowWithPanes | null {

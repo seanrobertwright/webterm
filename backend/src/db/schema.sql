@@ -41,3 +41,44 @@ CREATE TABLE IF NOT EXISTS panes (
 CREATE INDEX IF NOT EXISTS idx_windows_session_id ON windows(session_id);
 CREATE INDEX IF NOT EXISTS idx_panes_window_id ON panes(window_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_name ON sessions(name);
+
+-- ============================================================================
+-- tmux Compatibility Tables (v2)
+-- ============================================================================
+
+-- Key bindings table (user customizations only; defaults loaded from code)
+CREATE TABLE IF NOT EXISTS key_bindings (
+    id TEXT PRIMARY KEY,
+    key_table TEXT NOT NULL,
+    key TEXT NOT NULL,
+    command TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (key_table, key)
+);
+
+-- Options table (hierarchical configuration)
+CREATE TABLE IF NOT EXISTS options (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    scope_id TEXT,
+    name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (scope, scope_id, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_options_scope ON options(scope, scope_id);
+CREATE INDEX IF NOT EXISTS idx_options_name ON options(name);
+
+-- Hooks table (lifecycle event handlers)
+CREATE TABLE IF NOT EXISTS hooks (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL DEFAULT 'global',
+    scope_id TEXT,
+    event_name TEXT NOT NULL,
+    command TEXT NOT NULL,
+    ordering INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hooks_event ON hooks(event_name);

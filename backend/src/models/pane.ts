@@ -82,6 +82,9 @@ export function createPane(options: CreatePaneOptions): Pane {
     connectionState: 'disconnected',
     exitCode: null,
     createdAt: Date.now(),
+    title: '',
+    marked: false,
+    currentCommand: null,
   };
 }
 
@@ -195,6 +198,8 @@ export function rowToPane(row: {
   connection_state: string;
   exit_code: number | null;
   created_at: number;
+  title: string;
+  marked: number;
 }): Pane {
   return {
     id: row.id,
@@ -206,6 +211,9 @@ export function rowToPane(row: {
     connectionState: row.connection_state as ConnectionState,
     exitCode: row.exit_code,
     createdAt: row.created_at,
+    title: row.title ?? '',
+    marked: Boolean(row.marked),
+    currentCommand: null,
   };
 }
 
