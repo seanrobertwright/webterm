@@ -175,15 +175,17 @@ export class CommandService {
         // Hook commands
         // ================================================================
         case 'set-hook':
-          return this.stubSuccess();
+          return this.handleSetHook(parsed);
         case 'show-hooks':
-          return this.stubSuccess();
+          return this.handleShowHooks();
 
         // ================================================================
         // Display commands
         // ================================================================
         case 'display-message':
-          return this.stubSuccess();
+          return this.handleDisplayMessage(parsed);
+        case 'display-popup':
+          return this.handleDisplayPopup(parsed);
         case 'clock-mode':
           return this.stubSuccess();
         case 'capture-pane':
@@ -193,9 +195,9 @@ export class CommandService {
         // Interactive mode commands
         // ================================================================
         case 'choose-tree':
-          return this.stubSuccess();
+          return this.handleChooseTree(parsed);
         case 'choose-buffer':
-          return this.stubSuccess();
+          return this.handleChooseBuffer();
 
         default:
           return {
@@ -1326,6 +1328,70 @@ export class CommandService {
     }
     const lines = hooks.map((h) => `${h.event} -> ${h.command}`);
     return { output: lines.join('\n'), success: true };
+  }
+
+  // ==========================================================================
+  // Display command handlers
+  // ==========================================================================
+
+  /**
+   * display-message: Show a message to the user.
+   *
+   * Positional: message text
+   */
+  private handleDisplayMessage(parsed: ParsedCommand): CommandResult {
+    const message = parsed.positional[0] ?? '';
+    return { output: message, success: true };
+  }
+
+  /**
+   * display-popup: Display a popup window overlay.
+   *
+   * Flags: -w (width), -h (height), -E (close on exit)
+   * Positional: command text to display in popup
+   *
+   * Returns a special output marker `__POPUP__:w:h:content` that the
+   * WebSocket handler intercepts to send a popup message to the client.
+   */
+  private handleDisplayPopup(parsed: ParsedCommand): CommandResult {
+    const command = parsed.positional[0] ?? '';
+    const width = parsed.flags.get('w');
+    const height = parsed.flags.get('h');
+    const w = typeof width === 'string' ? parseInt(width, 10) : 80;
+    const h = typeof height === 'string' ? parseInt(height, 10) : 24;
+    return { output: `__POPUP__:${w}:${h}:${command}`, success: true };
+  }
+
+  // ==========================================================================
+  // Interactive mode handlers
+  // ==========================================================================
+
+  /**
+   * choose-tree: Launch interactive session/window tree browser.
+   *
+   * Returns a special marker so the WebSocket handler sends tree data.
+   * Flags: -s (start at sessions), -w (start at windows)
+   */
+  private handleChooseTree(parsed: ParsedCommand): CommandResult {
+    const startAtWindows = parsed.flags.get('w') === true;
+    const mode = startAtWindows ? 'windows' : 'sessions';
+    return { output: `__CHOOSE_TREE__:${mode}`, success: true };
+  }
+
+  /**
+   * choose-buffer: Launch interactive buffer selection browser.
+   *
+   * Returns buffer list as JSON so the client can render the picker.
+   */
+  private handleChooseBuffer(): CommandResult {
+    const buffers = pasteBufferService.list();
+    const data = buffers.map((b) => ({
+      name: b.name,
+      size: b.size,
+      preview: b.content.length > 50 ? b.content.slice(0, 50) + '...' : b.content,
+      content: b.content,
+    }));
+    return { output: `__CHOOSE_BUFFER__:${JSON.stringify(data)}`, success: true };
   }
 
   // ==========================================================================
