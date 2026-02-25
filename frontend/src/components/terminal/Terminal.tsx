@@ -223,15 +223,44 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       terminal.options.fontFamily = fontFamily;
       terminal.options.theme = theme ?? defaultTheme;
 
-      // Refit after settings change
-      if (fitAddonRef.current) {
+      // Font changes invalidate the WebGL glyph atlas — dispose and reload
+      // the addon so it rebuilds its texture cache with the new metrics.
+      if (webglAddonRef.current) {
         try {
-          fitAddonRef.current.fit();
+          webglAddonRef.current.dispose();
+          webglAddonRef.current = null;
         } catch {
-          // ignore fit errors during transitions
+          // ignore disposal errors
+        }
+
+        try {
+          const newWebgl = new WebglAddon();
+          newWebgl.onContextLoss(() => {
+            newWebgl.dispose();
+            webglAddonRef.current = null;
+          });
+          terminal.loadAddon(newWebgl);
+          webglAddonRef.current = newWebgl;
+        } catch {
+          // fall back to canvas renderer if WebGL fails
+          webglAddonRef.current = null;
         }
       }
-    }, [fontSize, fontFamily, theme]);
+
+      // Delay fit until xterm recalculates character cell dimensions
+      requestAnimationFrame(() => {
+        if (fitAddonRef.current && terminalRef.current) {
+          try {
+            fitAddonRef.current.fit();
+            const { cols, rows } = terminalRef.current;
+            terminalRef.current.refresh(0, rows - 1);
+            onResize?.(cols, rows);
+          } catch {
+            // ignore fit errors during transitions
+          }
+        }
+      });
+    }, [fontSize, fontFamily, theme, onResize]);
 
     // Handle focus changes
     useEffect(() => {
