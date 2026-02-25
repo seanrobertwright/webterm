@@ -2,14 +2,20 @@ import { useRef, useCallback, useEffect } from 'react';
 import type { ConnectionState, ShellType } from '@webterm/shared/models';
 import { Terminal, TerminalHandle } from './Terminal';
 import { ConnectionStatus } from './ConnectionStatus';
+import { useSettingsStore } from '../../stores/settings-store';
+import { terminalThemes } from '../../config/terminal-themes';
 
 // Global map to store terminal write functions
 declare global {
   var terminalRefs: Map<string, (data: string | Uint8Array) => void>;
+  var terminalHandles: Map<string, TerminalHandle>;
 }
 
 if (typeof window !== 'undefined' && !globalThis.terminalRefs) {
   globalThis.terminalRefs = new Map();
+}
+if (typeof window !== 'undefined' && !globalThis.terminalHandles) {
+  globalThis.terminalHandles = new Map();
 }
 
 export interface TerminalPaneProps {
@@ -52,16 +58,29 @@ export function TerminalPane({
   className = '',
 }: TerminalPaneProps) {
   const terminalRef = useRef<TerminalHandle>(null);
+  const { fontSize, fontFamily, themeName } = useSettingsStore();
+  const terminalTheme = (terminalThemes[themeName] ?? terminalThemes['default']) as import('@xterm/xterm').ITheme;
 
-  // Register terminal write function globally for output handling
+  // Register terminal write function and handle globally for output and clipboard
   useEffect(() => {
     const writeFn = (data: string | Uint8Array) => {
       terminalRef.current?.write(data);
     };
     globalThis.terminalRefs.set(paneId, writeFn);
 
+    // Expose handle for clipboard access (getSelection, hasSelection)
+    const updateHandle = () => {
+      if (terminalRef.current) {
+        globalThis.terminalHandles.set(paneId, terminalRef.current);
+      }
+    };
+    // Delay slightly to ensure ref is set after render
+    const timer = setTimeout(updateHandle, 100);
+
     return () => {
+      clearTimeout(timer);
       globalThis.terminalRefs.delete(paneId);
+      globalThis.terminalHandles.delete(paneId);
     };
   }, [paneId]);
 
@@ -111,6 +130,9 @@ export function TerminalPane({
           onData={handleData}
           onResize={handleResize}
           isFocused={isFocused}
+          fontSize={fontSize}
+          fontFamily={fontFamily}
+          theme={terminalTheme}
         />
       </div>
 

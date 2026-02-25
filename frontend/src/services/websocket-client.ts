@@ -53,11 +53,8 @@ const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
 
 /** Get default WebSocket URL based on environment */
 function getDefaultWebSocketUrl(): string {
-  const hostname = window.location.hostname;
-  // In development, connect to backend on port 3000/3001
-  // In production, use the same host:port as the page
-  const port = window.location.port ? (window.location.port === '5173' || window.location.port === '5174' ? '3000' : window.location.port) : '3000';
-  return `ws://${hostname}:${port}/ws`;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
 }
 
 /**
@@ -95,7 +92,7 @@ export class WebSocketClient {
 
   /** Connect to WebSocket server */
   connect(sessionId?: string): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
@@ -309,12 +306,18 @@ export class WebSocketClient {
 
   private handleJsonMessage(data: string): void {
     const message = JSON.parse(data) as ServerMessage;
-    
+
+    // Respond to server heartbeat pings immediately
+    if (message.type === 'ping') {
+      this.ws?.send(JSON.stringify({ type: 'pong' }));
+      return;
+    }
+
     // Handle connected message to store session ID
     if (message.type === 'connected') {
       this.sessionId = message.payload.sessionId;
     }
-    
+
     this.callbacks.onMessage?.(message);
   }
 

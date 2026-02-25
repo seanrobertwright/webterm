@@ -90,7 +90,7 @@ export async function handleListSessions(
   // Sort by updatedAt descending
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
 
-  sendJson(res, 200, { sessions });
+  sendJson(res, 200, sessions);
 }
 
 /**

@@ -15,9 +15,11 @@ import {
   MessageType,
 } from './protocol.js';
 import { ptyManager } from '../services/pty-service.js';
+import { sessionService } from '../services/session-service.js';
 import type { Pane, Layout, WindowWithPanes } from '@webterm/shared/models';
 import {
   createTerminalContext,
+  setWindowContext,
   handleResize,
   handleCreate,
   handleClose,
@@ -49,7 +51,6 @@ interface ClientConnection {
   terminalCtx: TerminalHandlerContext;
   sessionCtx: SessionHandlerContext;
   isAlive: boolean;
-  lastPing: number;
 }
 
 /** Output buffer for disconnected sessions */
@@ -148,24 +149,20 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
   let isReconnect = false;
 
   if (requestedSessionId) {
-    // Attempt to resume existing session
-    try {
-      // TODO: Fetch session from database
-      // session = await sessionService.getSession(requestedSessionId);
-      
-      // Placeholder session
+    // Attempt to resume existing session from database
+    const existingSession = sessionService.getSession(requestedSessionId);
+    if (existingSession) {
       session = {
-        id: requestedSessionId,
-        name: 'Resumed Session',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        activeWindowId: null,
+        id: existingSession.id,
+        name: existingSession.name,
+        createdAt: existingSession.createdAt,
+        updatedAt: existingSession.updatedAt,
+        activeWindowId: existingSession.activeWindowId,
       };
       sessionId = requestedSessionId;
       isReconnect = true;
-
-      logger.info('Session resumed', { sessionId });
-    } catch {
+      logger.info('Session resumed from DB', { sessionId });
+    } else {
       logger.warn('Session not found, creating new', { requestedSessionId });
       sessionId = randomUUID();
       session = createNewSession(sessionId);
@@ -217,7 +214,6 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
     terminalCtx,
     sessionCtx,
     isAlive: true,
-    lastPing: Date.now(),
   };
 
   serverState?.clients.set(sessionId, client);
@@ -230,54 +226,98 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
 
   // Create initial window if this is a new session
   if (!isReconnect) {
-    const paneId = randomUUID();
-    const windowId = randomUUID();
+    // Use sessionService.createSession to persist to DB immediately
+    const dbSession = sessionService.createSession({ name: session.name });
 
-    // Spawn PTY for the initial pane
-    const ptyInstance = ptyManager.spawn(paneId, {
-      shell: 'default',
-      cwd: undefined,
-      cols: 80,
-      rows: 24,
-    });
+    // The DB assigned its own IDs — update our sessionId mapping
+    // We need to re-map the client connection to the DB session ID
+    if (dbSession.id !== sessionId) {
+      serverState?.clients.delete(sessionId);
+      sessionId = dbSession.id;
+      client.sessionId = sessionId;
+      terminalCtx.sessionId = sessionId;
+      sessionCtx.sessionId = sessionId;
+      serverState?.clients.set(sessionId, client);
+      // Re-send connected with the correct session ID
+      sendConnected(ws, sessionId, {
+        id: dbSession.id,
+        name: dbSession.name,
+        createdAt: dbSession.createdAt,
+        updatedAt: dbSession.updatedAt,
+        activeWindowId: dbSession.activeWindowId,
+      });
+    }
 
-    const pane: Pane = {
-      id: paneId,
-      windowId,
-      shell: ptyInstance.shell,
-      cwd: ptyInstance.cwd,
-      cols: 80,
-      rows: 24,
-      connectionState: 'connected',
-      exitCode: null,
-      createdAt: Date.now(),
-    };
+    const dbWindow = dbSession.windows[0];
+    if (dbWindow) {
+      const dbPane = dbWindow.panes[0];
+      if (dbPane) {
+        // Spawn PTY for the initial pane
+        ptyManager.spawn(dbPane.id, {
+          shell: dbPane.shell,
+          cols: dbPane.cols,
+          rows: dbPane.rows,
+        });
 
-    const layout: Layout = { type: 'leaf', paneId };
+        // Update pane connection state in DB
+        sessionService.updatePaneConnectionState(dbPane.id, 'connected');
 
-    const window: WindowWithPanes = {
-      id: windowId,
-      sessionId,
-      name: 'Main',
-      index: 0,
-      createdAt: Date.now(),
-      layout,
-      panes: [pane],
-    };
+        // Update pane object for the client message
+        dbPane.connectionState = 'connected';
+      }
 
-    // Send window created message to initialize the client
-    sendWindowCreated(ws, window);
-    logger.info('Initial window created', { windowId, sessionId, paneId });
+      // Set window context on terminal handler so split/close have layout access
+      setWindowContext(terminalCtx, dbWindow.id, dbWindow.layout);
+
+      // Send window created message to initialize the client
+      sendWindowCreated(ws, dbWindow);
+      logger.info('Initial window created', { windowId: dbWindow.id, sessionId, paneId: dbPane?.id });
+    }
   }
 
-  // If reconnecting, check for buffered output
+  // If reconnecting, restore windows/layout and send buffered output
   if (isReconnect) {
+    const restoredSession = sessionService.getSession(sessionId);
+    if (restoredSession) {
+      // Send each window's layout to the client and set up terminal context
+      for (const win of restoredSession.windows) {
+        // Re-spawn PTYs for panes that aren't already running
+        for (const pane of win.panes) {
+          if (!ptyManager.hasPty(pane.id)) {
+            const spawnOpts: { shell: typeof pane.shell; cols: number; rows: number; cwd?: string } = {
+              shell: pane.shell,
+              cols: pane.cols,
+              rows: pane.rows,
+            };
+            if (pane.cwd !== null) {
+              spawnOpts.cwd = pane.cwd;
+            }
+            ptyManager.spawn(pane.id, spawnOpts);
+          }
+        }
+
+        sendWindowCreated(ws, win);
+      }
+
+      // Set terminal context to the active window
+      const activeWin = restoredSession.windows.find(w => w.id === restoredSession.activeWindowId)
+        ?? restoredSession.windows[0];
+      if (activeWin) {
+        setWindowContext(terminalCtx, activeWin.id, activeWin.layout);
+      }
+
+      logger.info('Session restored from DB', {
+        sessionId,
+        windowCount: restoredSession.windows.length,
+      });
+    }
+
+    // Send buffered output
     const buffer = serverState?.disconnectedBuffers.get(sessionId);
     if (buffer && buffer.data.size > 0) {
       const missedPaneIds = Array.from(buffer.data.keys());
       sendReconnected(ws, sessionId, missedPaneIds);
 
-      // Send buffered output
       for (const [paneId, chunks] of buffer.data) {
         for (const chunk of chunks) {
           sendBinaryOutput(ws, paneId, chunk);
@@ -322,9 +362,9 @@ function setupWebSocketHandlers(client: ClientConnection): void {
     }
   });
 
+  // Also handle protocol-level pong (direct connections, not proxied)
   ws.on('pong', () => {
     client.isAlive = true;
-    client.lastPing = Date.now();
   });
 
   ws.on('close', (code: number, reason: Buffer) => {
@@ -386,6 +426,16 @@ async function handleJsonMessage(
   logger.debug('Received message', { type: message.type });
 
   switch (message.type) {
+    // Heartbeat
+    case 'pong': {
+      // Find the client for this context and mark as alive
+      const client = serverState?.clients.get(terminalCtx.sessionId);
+      if (client) {
+        client.isAlive = true;
+      }
+      return;
+    }
+
     // Terminal operations
     case 'resize':
       await handleResize(terminalCtx, message);
@@ -466,27 +516,21 @@ function startHeartbeat(): void {
   if (!serverState) return;
 
   serverState.heartbeatInterval = setInterval(() => {
-    const now = Date.now();
-
     serverState?.clients.forEach((client, sessionId) => {
       if (!client.isAlive) {
-        // Client didn't respond to ping, terminate
+        // Client didn't respond to the previous ping — terminate
         logger.warn('Client heartbeat timeout', { sessionId });
         client.ws.terminate();
         serverState?.clients.delete(sessionId);
         return;
       }
 
-      // Check if ping timeout exceeded
-      if (now - client.lastPing > config.wsHeartbeatTimeout) {
-        logger.warn('Client ping timeout', { sessionId });
-        client.ws.terminate();
-        serverState?.clients.delete(sessionId);
-        return;
-      }
-
+      // Mark as dead; the pong handler will set it back to true
       client.isAlive = false;
-      client.ws.ping();
+      // Send application-level ping (works through proxies like Vite dev server)
+      if (client.ws.readyState === client.ws.OPEN) {
+        client.ws.send(JSON.stringify({ type: 'ping' }));
+      }
     });
   }, config.wsHeartbeatInterval);
 

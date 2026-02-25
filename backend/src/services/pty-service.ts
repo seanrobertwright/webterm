@@ -3,7 +3,7 @@
  * Handles node-pty lifecycle and communication
  */
 
-import * as pty from 'node-pty';
+import * as pty from '@lydell/node-pty';
 import os from 'os';
 import { getDefaultShell, resolveShellPath } from './shell-service.js';
 import { logger } from '../utils/logger.js';
@@ -69,6 +69,12 @@ export class PtyManager {
       ...additionalEnv,
     };
 
+    // Remove Claude Code env vars so spawned shells don't think
+    // they're inside a Claude Code instance
+    delete env['CLAUDECODE'];
+    delete env['CLAUDE_CODE_SSE_PORT'];
+    delete env['CLAUDE_CODE_ENTRYPOINT'];
+
     // On Windows, ensure SystemRoot is set (required for PowerShell)
     if (os.platform() === 'win32') {
       if (!env['SystemRoot']) {
@@ -122,7 +128,6 @@ export class PtyManager {
       rows,
       cwd,
       env: this.getEnvironment(env),
-      useConpty: os.platform() === 'win32', // Use ConPTY on Windows
     });
 
     // Store the instance

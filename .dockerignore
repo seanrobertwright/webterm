@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.git/
+*.db
+*.db-*
+.env*
+coverage/
+.planning/

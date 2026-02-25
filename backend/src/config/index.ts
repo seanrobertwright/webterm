@@ -2,6 +2,9 @@
  * Environment configuration management
  */
 
+import os from 'os';
+import path from 'path';
+
 export interface Config {
   /** Server port */
   port: number;
@@ -34,10 +37,19 @@ function getEnvNumber(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+function getDefaultDbPath(): string {
+  if (process.env['WEBTERM_DB_PATH']) return process.env['WEBTERM_DB_PATH'];
+  if (process.env['NODE_ENV'] === 'production') {
+    const dataDir = process.env['WEBTERM_DATA_DIR'] ?? path.join(os.homedir(), '.webterm');
+    return path.join(dataDir, 'data', 'webterm.db');
+  }
+  return './data/webterm.db';
+}
+
 export const config: Config = {
-  port: getEnvNumber('PORT', 3000),
+  port: getEnvNumber('PORT', 9174),
   host: getEnvString('HOST', 'localhost'),
-  dbPath: getEnvString('WEBTERM_DB_PATH', './data/webterm.db'),
+  dbPath: getDefaultDbPath(),
   logLevel: getEnvString('LOG_LEVEL', 'info') as Config['logLevel'],
   wsHeartbeatInterval: getEnvNumber('WS_HEARTBEAT_INTERVAL', 30000),
   wsHeartbeatTimeout: getEnvNumber('WS_HEARTBEAT_TIMEOUT', 10000),

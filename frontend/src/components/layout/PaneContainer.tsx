@@ -10,6 +10,8 @@ export interface PaneContainerProps {
   panes: Map<string, Pane>;
   /** Currently focused pane ID */
   activePaneId?: string | null;
+  /** Zoomed pane ID (renders only this pane at 100%) */
+  zoomedPaneId?: string | null;
   /** Set of pane IDs in broadcast mode */
   broadcastPaneIds?: Set<string>;
   /** Callback when user types in a pane */
@@ -215,7 +217,7 @@ function LayoutNode({
 
 /** Recursive layout renderer for pane container */
 export function PaneContainer(props: PaneContainerProps) {
-  const { layout, panes, className = '', ...rest } = props;
+  const { layout, panes, zoomedPaneId, className = '', ...rest } = props;
 
   // Convert panes array to map if needed, with null/undefined check
   const panesMap = useMemo(() => {
@@ -229,6 +231,26 @@ export function PaneContainer(props: PaneContainerProps) {
       return new Map<string, Pane>();
     }
   }, [panes]);
+
+  // Zoom mode: render only the zoomed pane at 100%
+  if (zoomedPaneId) {
+    const zoomedLayout: Layout = { type: 'leaf', paneId: zoomedPaneId };
+    const zoomedProps: LayoutNodeProps = {
+      layout: zoomedLayout,
+      panes: panesMap,
+      path: [],
+      activePaneId: zoomedPaneId,
+    };
+    if (rest.onPaneData) zoomedProps.onPaneData = rest.onPaneData;
+    if (rest.onPaneResize) zoomedProps.onPaneResize = rest.onPaneResize;
+    if (rest.onPaneFocus) zoomedProps.onPaneFocus = rest.onPaneFocus;
+    if (rest.onPaneRestart) zoomedProps.onPaneRestart = rest.onPaneRestart;
+    return (
+      <div className={`w-full h-full overflow-hidden ${className}`}>
+        <LayoutNode {...zoomedProps} />
+      </div>
+    );
+  }
 
   return (
     <div className={`w-full h-full overflow-hidden ${className}`}>
