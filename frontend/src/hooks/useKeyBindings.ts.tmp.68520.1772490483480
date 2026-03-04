@@ -233,15 +233,11 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       clearTimeout(prefixTimeoutRef.current);
     }
 
-    const state = { active: true, timestamp: Date.now() };
-    prefixModeRef.current = state;  // Synchronous update for immediate reads
-    setPrefixMode(state);
+    setPrefixMode({ active: true, timestamp: Date.now() });
     onPrefixModeChangeRef.current?.(true);
 
     prefixTimeoutRef.current = setTimeout(() => {
-      const off = { active: false, timestamp: null };
-      prefixModeRef.current = off;
-      setPrefixMode(off);
+      setPrefixMode({ active: false, timestamp: null });
       onPrefixModeChangeRef.current?.(false);
     }, prefixTimeout);
   }, [prefixTimeout]);
@@ -251,9 +247,7 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       clearTimeout(prefixTimeoutRef.current);
       prefixTimeoutRef.current = null;
     }
-    const off = { active: false, timestamp: null };
-    prefixModeRef.current = off;  // Synchronous update for immediate reads
-    setPrefixMode(off);
+    setPrefixMode({ active: false, timestamp: null });
     onPrefixModeChangeRef.current?.(false);
   }, []);
 
@@ -275,15 +269,11 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       return true;
     }
 
-    // Read prefix state from ref so this callback is always current,
-    // even before React effects propagate the new function reference.
-    const isPrefixActive = prefixModeRef.current.active;
-
     const { key, ctrlKey, shiftKey, altKey, metaKey } = event;
 
     // Check for prefix key (Ctrl+prefix)
     if (ctrlKey && !shiftKey && !altKey && !metaKey && key.toLowerCase() === prefixKey) {
-      if (!isPrefixActive) {
+      if (!prefixMode.active) {
         enterPrefixMode();
         return false;
       } else {
@@ -323,7 +313,7 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       }
 
       // If in prefix mode, look up in prefix table
-      if (isPrefixActive) {
+      if (prefixMode.active) {
         const tmuxKey = eventToTmuxKey(event);
         if (tmuxKey && prefixBindings) {
           const binding = prefixBindings.find((b) => b.key === tmuxKey);
@@ -355,7 +345,7 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
     }
 
     // Check prefix bindings
-    if (isPrefixActive) {
+    if (prefixMode.active) {
       for (const binding of legacyBindings) {
         if (binding.requiresPrefix && matchesBindingInPrefixMode(event, binding)) {
           exitPrefixMode();
@@ -370,7 +360,7 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
     }
 
     return true;
-  }, [enabled, prefixKey, storeLoaded, prefixBindings, rootBindings, legacyBindings, enterPrefixMode, exitPrefixMode]);
+  }, [enabled, prefixKey, prefixMode.active, storeLoaded, prefixBindings, rootBindings, legacyBindings, enterPrefixMode, exitPrefixMode]);
 
   // ============================================================================
   // Dispatch

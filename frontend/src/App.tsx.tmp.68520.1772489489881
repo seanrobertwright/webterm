@@ -10,13 +10,11 @@ import { ClipboardNotification } from './components/ui/ClipboardNotification';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { usePaneStore } from './stores/pane-store';
 import { useSessionStore } from './stores/session-store';
-import { useKeybindingStore } from './stores/keybinding-store';
 import { useGlobalKeyBindings, type UseKeyBindingsOptions } from './hooks/useKeyBindings';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useMessageHandlers } from './hooks/useMessageHandlers';
 import { useClipboard } from './hooks/useClipboard';
 import { DisconnectionOverlay } from './components/terminal/DisconnectionOverlay';
-import { StatusBar } from './components/StatusBar';
 import { findAdjacentPaneId } from './utils/layout-navigation';
 import {
   saveSession as apiSaveSession,
@@ -24,15 +22,11 @@ import {
   fetchSessions,
   fetchSession,
 } from './services/session-api';
-import { fetchKeybindings } from './services/keybinding-api';
-import { getWebSocketClient } from './services/websocket-client';
 import type { ConnectionState } from '@webterm/shared/models';
 import type { KeybindingAction } from './types';
 
 declare global {
   var terminalRefs: Map<string, (data: string | Uint8Array) => void>;
-  /** Global keybinding handler — returns false when the key is consumed */
-  var webtermKeyHandler: ((event: KeyboardEvent) => boolean) | null;
 }
 
 function App() {
@@ -63,22 +57,13 @@ function App() {
 
   const {
     connectionState: wsState,
-    sessionId: wsSessionId,
+    sessionId,
     sendInput,
     sendResize,
     sendMessage
   } = useWebSocket({
     onOutput: handleOutput,
   });
-
-  // The WebSocket client stores sessionId internally when it receives the
-  // 'connected' message. The React state (wsSessionId) may not be set because
-  // useMessageHandlers overwrites the onMessage callback. Use a getter that
-  // reads from the client as a reliable fallback.
-  const getSessionId = useCallback(
-    () => wsSessionId ?? getWebSocketClient().currentSessionId,
-    [wsSessionId]
-  );
 
   // Set up message handlers for WebSocket events
   useMessageHandlers();
@@ -89,19 +74,6 @@ function App() {
       .then(setSavedSessions)
       .catch((err) => console.error('[App] Failed to load saved sessions:', err));
   }, [setSavedSessions]);
-
-  // Load keybindings from backend on app start
-  const { setAllTables, setPrefixKey } = useKeybindingStore();
-  useEffect(() => {
-    fetchKeybindings()
-      .then((data) => {
-        setAllTables(data.tables);
-        if (data.prefixKey) {
-          setPrefixKey(data.prefixKey);
-        }
-      })
-      .catch((err) => console.error('[App] Failed to load keybindings:', err));
-  }, [setAllTables, setPrefixKey]);
 
   // Keybinding action handler
   const handleKeybindingAction = useCallback(
@@ -134,13 +106,11 @@ function App() {
         case 'zoomPane':
           toggleZoom();
           break;
-        case 'newWindow': {
-          const sid = getSessionId();
-          if (sid) {
-            sendMessage({ type: 'createWindow', payload: { sessionId: sid } });
+        case 'newWindow':
+          if (sessionId) {
+            sendMessage({ type: 'createWindow', payload: { sessionId } });
           }
           break;
-        }
         case 'nextWindow': {
           const curIdx = windows.findIndex(w => w.id === activeWindowId);
           if (curIdx !== -1 && windows.length > 0) {
@@ -179,7 +149,7 @@ function App() {
           break;
       }
     },
-    [activePane, layout, panes, sendMessage, getSessionId, setActivePane, toggleZoom, windows, activeWindowId, setActiveWindow, copySelection, pasteToPane, sendInput]
+    [activePane, layout, panes, sendMessage, sessionId, setActivePane, toggleZoom, windows, activeWindowId, setActiveWindow, copySelection, pasteToPane, sendInput]
   );
 
   // Handle server-side tmux command execution from keybindings
@@ -198,16 +168,7 @@ function App() {
     }),
     [handleKeybindingAction, handleKeybindingCommand]
   );
-  const { handleKeyEvent } = useGlobalKeyBindings(keybindingOptions);
-
-  // Expose the keybinding handler globally so Terminal instances can call it
-  // from attachCustomKeyEventHandler without prop-drilling through 4 layers.
-  useEffect(() => {
-    globalThis.webtermKeyHandler = handleKeyEvent;
-    return () => {
-      globalThis.webtermKeyHandler = null;
-    };
-  }, [handleKeyEvent]);
+  useKeyBindings(keybindingOptions);
 
   // Map WebSocket state to ConnectionState
   const connectionState: ConnectionState =
@@ -257,11 +218,10 @@ function App() {
   );
 
   const handleNewWindow = useCallback(() => {
-    const sid = getSessionId();
-    if (sid) {
-      sendMessage({ type: 'createWindow', payload: { sessionId: sid } });
+    if (sessionId) {
+      sendMessage({ type: 'createWindow', payload: { sessionId } });
     }
-  }, [getSessionId, sendMessage]);
+  }, [sessionId, sendMessage]);
 
   const handleWindowClose = useCallback(
     (windowId: string) => {
@@ -272,13 +232,12 @@ function App() {
 
   // T003: Save session handler
   const handleSaveSession = useCallback(async (name: string) => {
-    const sid = getSessionId();
-    if (!sid) return;
+    if (!sessionId) return;
     setIsSaving(true);
     setSaveError(null);
     try {
-      await apiUpdateSession(sid, { name });
-      await apiSaveSession(sid);
+      await apiUpdateSession(sessionId, { name });
+      await apiSaveSession(sessionId);
       updateSession({ name });
       setShowSaveDialog(false);
       // Refresh saved sessions list
@@ -289,19 +248,18 @@ function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [getSessionId, updateSession, setSavedSessions]);
+  }, [sessionId, updateSession, setSavedSessions]);
 
   // T012: Session name save from inline edit
   const handleSessionNameSave = useCallback(async (newName: string) => {
-    const sid = getSessionId();
-    if (!sid) return;
+    if (!sessionId) return;
     try {
-      await apiUpdateSession(sid, { name: newName });
+      await apiUpdateSession(sessionId, { name: newName });
       updateSession({ name: newName });
     } catch (err) {
       console.error('[App] Failed to update session name:', err);
     }
-  }, [getSessionId, updateSession]);
+  }, [sessionId, updateSession]);
 
   // T004: Restore session
   const handleRestoreSession = useCallback(async (restoreSessionId: string) => {
@@ -379,7 +337,7 @@ function App() {
           {...(windows.length > 1 ? { onTabClose: handleWindowClose } : {})}
           onNewWindow={handleNewWindow}
         />
-        <main className="flex-1 relative overflow-hidden p-2 pb-8">
+        <main className="flex-1 relative overflow-hidden p-2">
           <PaneContainer
             layout={layout}
             panes={panes}
@@ -394,7 +352,6 @@ function App() {
             <DisconnectionOverlay isVisible={true} />
           )}
         </main>
-        <StatusBar onSwitchWindow={handleWindowTabClick} />
       </div>
 
       {/* Save Session Dialog */}

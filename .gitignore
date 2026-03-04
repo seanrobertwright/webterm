@@ -46,3 +46,6 @@ coverage/
 
 # Publish staging
 publish/
+
+# RLM Navigator (local install)
+.rlm/

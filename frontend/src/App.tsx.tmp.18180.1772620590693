@@ -10,7 +10,6 @@ import { ClipboardNotification } from './components/ui/ClipboardNotification';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { usePaneStore } from './stores/pane-store';
 import { useSessionStore } from './stores/session-store';
-import { useKeybindingStore } from './stores/keybinding-store';
 import { useGlobalKeyBindings, type UseKeyBindingsOptions } from './hooks/useKeyBindings';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useMessageHandlers } from './hooks/useMessageHandlers';
@@ -24,7 +23,6 @@ import {
   fetchSessions,
   fetchSession,
 } from './services/session-api';
-import { fetchKeybindings } from './services/keybinding-api';
 import { getWebSocketClient } from './services/websocket-client';
 import type { ConnectionState } from '@webterm/shared/models';
 import type { KeybindingAction } from './types';
@@ -89,19 +87,6 @@ function App() {
       .then(setSavedSessions)
       .catch((err) => console.error('[App] Failed to load saved sessions:', err));
   }, [setSavedSessions]);
-
-  // Load keybindings from backend on app start
-  const { setAllTables, setPrefixKey } = useKeybindingStore();
-  useEffect(() => {
-    fetchKeybindings()
-      .then((data) => {
-        setAllTables(data.tables);
-        if (data.prefixKey) {
-          setPrefixKey(data.prefixKey);
-        }
-      })
-      .catch((err) => console.error('[App] Failed to load keybindings:', err));
-  }, [setAllTables, setPrefixKey]);
 
   // Keybinding action handler
   const handleKeybindingAction = useCallback(
@@ -272,13 +257,12 @@ function App() {
 
   // T003: Save session handler
   const handleSaveSession = useCallback(async (name: string) => {
-    const sid = getSessionId();
-    if (!sid) return;
+    if (!sessionId) return;
     setIsSaving(true);
     setSaveError(null);
     try {
-      await apiUpdateSession(sid, { name });
-      await apiSaveSession(sid);
+      await apiUpdateSession(sessionId, { name });
+      await apiSaveSession(sessionId);
       updateSession({ name });
       setShowSaveDialog(false);
       // Refresh saved sessions list
@@ -289,19 +273,18 @@ function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [getSessionId, updateSession, setSavedSessions]);
+  }, [sessionId, updateSession, setSavedSessions]);
 
   // T012: Session name save from inline edit
   const handleSessionNameSave = useCallback(async (newName: string) => {
-    const sid = getSessionId();
-    if (!sid) return;
+    if (!sessionId) return;
     try {
-      await apiUpdateSession(sid, { name: newName });
+      await apiUpdateSession(sessionId, { name: newName });
       updateSession({ name: newName });
     } catch (err) {
       console.error('[App] Failed to update session name:', err);
     }
-  }, [getSessionId, updateSession]);
+  }, [sessionId, updateSession]);
 
   // T004: Restore session
   const handleRestoreSession = useCallback(async (restoreSessionId: string) => {

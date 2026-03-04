@@ -74,6 +74,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       fontFamily = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
       theme,
       className = '',
+      onCustomKeyEvent,
     },
     ref
   ) => {
@@ -83,6 +84,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const webglAddonRef = useRef<WebglAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onCustomKeyEventRef = useRef(onCustomKeyEvent);
 
     // Expose methods via ref
     useImperativeHandle(
@@ -106,6 +108,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       }),
       []
     );
+
+    useEffect(() => {
+      onCustomKeyEventRef.current = onCustomKeyEvent;
+    }, [onCustomKeyEvent]);
 
     // Debounced fit function
     const debouncedFit = useCallback(() => {
@@ -156,15 +162,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Attach custom key event handler — returning false prevents xterm
       // from processing the key (used by the prefix-key / keybinding system).
-      // The global handler is set by useGlobalKeyBindings in App.tsx.
       terminal.attachCustomKeyEventHandler((event) => {
-        if (globalThis.webtermKeyHandler) {
-          const allowXterm = globalThis.webtermKeyHandler(event);
-          if (!allowXterm) {
-            // Mark so the global capture listener skips double-processing
-            (event as KeyboardEvent & { _webtermHandled?: boolean })._webtermHandled = true;
-          }
-          return allowXterm;
+        if (onCustomKeyEventRef.current) {
+          return onCustomKeyEventRef.current(event);
         }
         return true;
       });

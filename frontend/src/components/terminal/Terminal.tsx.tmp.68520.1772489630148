@@ -159,12 +159,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // The global handler is set by useGlobalKeyBindings in App.tsx.
       terminal.attachCustomKeyEventHandler((event) => {
         if (globalThis.webtermKeyHandler) {
-          const allowXterm = globalThis.webtermKeyHandler(event);
-          if (!allowXterm) {
-            // Mark so the global capture listener skips double-processing
-            (event as KeyboardEvent & { _webtermHandled?: boolean })._webtermHandled = true;
-          }
-          return allowXterm;
+          return globalThis.webtermKeyHandler(event);
         }
         return true;
       });

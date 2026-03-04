@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"C:/Projects/webterm/.rlm/hooks/rlm-session-end.js\""
+          }
+        ]
+      }
+    ]
+  }
+}

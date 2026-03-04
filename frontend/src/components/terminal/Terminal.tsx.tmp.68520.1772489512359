@@ -36,6 +36,11 @@ export interface TerminalProps {
   theme?: ITheme;
   /** Additional CSS classes */
   className?: string;
+  /**
+   * Custom key event handler passed to xterm's attachCustomKeyEventHandler.
+   * Return false to prevent xterm from processing the key (e.g. for prefix keys).
+   */
+  onCustomKeyEvent?: (event: KeyboardEvent) => boolean;
 }
 
 /** Base terminal component using xterm.js with WebGL rendering */
@@ -153,21 +158,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
 
       // Open terminal in container
       terminal.open(containerRef.current);
-
-      // Attach custom key event handler — returning false prevents xterm
-      // from processing the key (used by the prefix-key / keybinding system).
-      // The global handler is set by useGlobalKeyBindings in App.tsx.
-      terminal.attachCustomKeyEventHandler((event) => {
-        if (globalThis.webtermKeyHandler) {
-          const allowXterm = globalThis.webtermKeyHandler(event);
-          if (!allowXterm) {
-            // Mark so the global capture listener skips double-processing
-            (event as KeyboardEvent & { _webtermHandled?: boolean })._webtermHandled = true;
-          }
-          return allowXterm;
-        }
-        return true;
-      });
 
       // Load WebGL addon for GPU-accelerated rendering
       try {

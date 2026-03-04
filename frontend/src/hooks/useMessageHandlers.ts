@@ -14,7 +14,7 @@ import type { ServerMessage } from '@webterm/shared/index';
  */
 export function useMessageHandlers(): void {
   const { setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, setActivePane } = usePaneStore();
-  const { addWindow, removeWindow, updateWindow, clearSession, setSession } = useSessionStore();
+  const { addWindow, removeWindow, updateWindow, clearSession, setSession, setActiveWindow } = useSessionStore();
 
   useEffect(() => {
     const handleMessage = (message: ServerMessage) => {
@@ -33,6 +33,7 @@ export function useMessageHandlers(): void {
 
           // Update session store
           addWindow(window);
+          setActiveWindow(window.id);
 
           break;
         }
@@ -189,5 +190,5 @@ export function useMessageHandlers(): void {
     });
 
     // Cleanup is handled by the WebSocket client itself
-  }, [setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, setActivePane, addWindow, removeWindow, updateWindow, clearSession, setSession]);
+  }, [setLayout, setWindowId, setInitialState, addPane, removePane, setPaneExitCode, setActivePane, addWindow, removeWindow, updateWindow, clearSession, setSession, setActiveWindow]);
 }

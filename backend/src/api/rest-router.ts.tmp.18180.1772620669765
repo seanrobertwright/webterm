@@ -76,9 +76,6 @@ registerRoute('PATCH', '/api/v1/sessions/:id', handleUpdateSession);
 registerRoute('DELETE', '/api/v1/sessions/:id', handleDeleteSession);
 registerRoute('POST', '/api/v1/sessions/:id/save', handleSaveSession);
 
-// Keybindings
-registerRoute('GET', '/api/v1/keybindings', handleListKeybindings);
-
 // ============================================================================
 // Request Handler
 // ============================================================================

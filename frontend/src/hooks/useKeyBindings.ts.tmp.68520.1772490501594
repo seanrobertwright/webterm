@@ -233,15 +233,11 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       clearTimeout(prefixTimeoutRef.current);
     }
 
-    const state = { active: true, timestamp: Date.now() };
-    prefixModeRef.current = state;  // Synchronous update for immediate reads
-    setPrefixMode(state);
+    setPrefixMode({ active: true, timestamp: Date.now() });
     onPrefixModeChangeRef.current?.(true);
 
     prefixTimeoutRef.current = setTimeout(() => {
-      const off = { active: false, timestamp: null };
-      prefixModeRef.current = off;
-      setPrefixMode(off);
+      setPrefixMode({ active: false, timestamp: null });
       onPrefixModeChangeRef.current?.(false);
     }, prefixTimeout);
   }, [prefixTimeout]);
@@ -251,9 +247,7 @@ export function useKeyBindings(options: UseKeyBindingsOptions = {}): UseKeyBindi
       clearTimeout(prefixTimeoutRef.current);
       prefixTimeoutRef.current = null;
     }
-    const off = { active: false, timestamp: null };
-    prefixModeRef.current = off;  // Synchronous update for immediate reads
-    setPrefixMode(off);
+    setPrefixMode({ active: false, timestamp: null });
     onPrefixModeChangeRef.current?.(false);
   }, []);
 

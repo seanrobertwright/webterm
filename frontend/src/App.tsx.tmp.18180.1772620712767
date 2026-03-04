@@ -90,19 +90,6 @@ function App() {
       .catch((err) => console.error('[App] Failed to load saved sessions:', err));
   }, [setSavedSessions]);
 
-  // Load keybindings from backend on app start
-  const { setAllTables, setPrefixKey } = useKeybindingStore();
-  useEffect(() => {
-    fetchKeybindings()
-      .then((data) => {
-        setAllTables(data.tables);
-        if (data.prefixKey) {
-          setPrefixKey(data.prefixKey);
-        }
-      })
-      .catch((err) => console.error('[App] Failed to load keybindings:', err));
-  }, [setAllTables, setPrefixKey]);
-
   // Keybinding action handler
   const handleKeybindingAction = useCallback(
     (action: KeybindingAction) => {
