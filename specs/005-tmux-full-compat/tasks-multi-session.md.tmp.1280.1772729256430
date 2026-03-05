@@ -31,11 +31,11 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [x] T002 Add `switchSession(newSessionId: string)` method to `WebSocketClient` in `frontend/src/services/websocket-client.ts` — calls `disconnect()` then `connect(newSessionId)`
-- [x] T003 Fix `connect()` early-return guard in `frontend/src/services/websocket-client.ts` to allow reconnection when `sessionId` differs from `this.sessionId`
-- [x] T004 [P] Add `resetForSessionSwitch()` action to session store in `frontend/src/stores/session-store.ts` — clears `currentSession`, `windows`, `activeWindowId`, `error`; preserves `savedSessions`, `isLoading`
-- [x] T005 [P] Add `resetForSessionSwitch()` action to pane store in `frontend/src/stores/pane-store.ts` — clears `layout`, `panes`, `activePane`, `zoomedPane`
-- [x] T006 Expose `switchSession` through the `useWebSocket` hook in `frontend/src/hooks/useWebSocket.ts` — add to return value and create a `useCallback` wrapper
+- [ ] T002 Add `switchSession(newSessionId: string)` method to `WebSocketClient` in `frontend/src/services/websocket-client.ts` — calls `disconnect()` then `connect(newSessionId)`
+- [ ] T003 Fix `connect()` early-return guard in `frontend/src/services/websocket-client.ts` to allow reconnection when `sessionId` differs from `this.sessionId`
+- [ ] T004 [P] Add `resetForSessionSwitch()` action to session store in `frontend/src/stores/session-store.ts` — clears `currentSession`, `windows`, `activeWindowId`, `error`; preserves `savedSessions`, `isLoading`
+- [ ] T005 [P] Add `resetForSessionSwitch()` action to pane store in `frontend/src/stores/pane-store.ts` — clears `layout`, `panes`, `activePane`, `zoomedPane`
+- [ ] T006 Expose `switchSession` through the `useWebSocket` hook in `frontend/src/hooks/useWebSocket.ts` — add to return value and create a `useCallback` wrapper
 
 **Checkpoint**: Foundation ready — `switchSession`, store resets, and hook exposure all in place.
 
@@ -49,9 +49,9 @@
 
 ### Implementation for User Story 1
 
-- [x] T007 [US1] Implement `handleNewSession` callback in `frontend/src/App.tsx` — calls `apiCreateSession()`, then `resetForSessionSwitch()` on both stores, then `client.switchSession(session.id)`
-- [x] T008 [US1] Wire `handleNewSession` to `<SessionPanel onNewSession={handleNewSession} />` in `frontend/src/App.tsx` replacing the current `handleNewWindow` reference
-- [x] T009 [US1] Refresh `savedSessions` list after creating a new session in `handleNewSession` in `frontend/src/App.tsx` — call `fetchSessions().then(setSavedSessions)` after switch completes
+- [ ] T007 [US1] Implement `handleNewSession` callback in `frontend/src/App.tsx` — calls `apiCreateSession()`, then `resetForSessionSwitch()` on both stores, then `client.switchSession(session.id)`
+- [ ] T008 [US1] Wire `handleNewSession` to `<SessionPanel onNewSession={handleNewSession} />` in `frontend/src/App.tsx` replacing the current `handleNewWindow` reference
+- [ ] T009 [US1] Refresh `savedSessions` list after creating a new session in `handleNewSession` in `frontend/src/App.tsx` — call `fetchSessions().then(setSavedSessions)` after switch completes
 
 **Checkpoint**: New Session button creates a truly new session. Previous session remains in the database and can be seen in the saved sessions list.
 
@@ -65,8 +65,8 @@
 
 ### Implementation for User Story 2
 
-- [x] T010 [US2] Replace the TODO stub in `handleRestoreSession` in `frontend/src/App.tsx` — call `resetForSessionSwitch()` on both stores then `client.switchSession(sessionId)`
-- [x] T011 [US2] Add loading state feedback during session switch in `frontend/src/App.tsx` — show "Switching session..." in the UI while WebSocket reconnects
+- [ ] T010 [US2] Replace the TODO stub in `handleRestoreSession` in `frontend/src/App.tsx` — call `resetForSessionSwitch()` on both stores then `client.switchSession(sessionId)`
+- [ ] T011 [US2] Add loading state feedback during session switch in `frontend/src/App.tsx` — show "Switching session..." in the UI while WebSocket reconnects
 
 **Checkpoint**: Users can freely switch between sessions. Each session maintains independent state.
 
@@ -80,9 +80,9 @@
 
 ### Implementation for User Story 3
 
-- [x] T012 [US3] Pass `currentSessionId` to `SessionPanel` component in `frontend/src/App.tsx` — add prop to `SessionPanelProps` interface
-- [x] T013 [US3] Update `SessionPanel` in `frontend/src/components/session/SessionPanel.tsx` to accept `currentSessionId` prop and disable delete button when `session.id === currentSessionId` with a tooltip "Cannot delete active session"
-- [x] T014 [US3] Add visual differentiation for the active session in the session list in `frontend/src/components/session/SessionPanel.tsx` — highlight or badge the currently connected session
+- [ ] T012 [US3] Pass `currentSessionId` to `SessionPanel` component in `frontend/src/App.tsx` — add prop to `SessionPanelProps` interface
+- [ ] T013 [US3] Update `SessionPanel` in `frontend/src/components/session/SessionPanel.tsx` to accept `currentSessionId` prop and disable delete button when `session.id === currentSessionId` with a tooltip "Cannot delete active session"
+- [ ] T014 [US3] Add visual differentiation for the active session in the session list in `frontend/src/components/session/SessionPanel.tsx` — highlight or badge the currently connected session
 
 **Checkpoint**: Active session is protected from deletion. Inactive sessions can be safely deleted without affecting the live session.
 
@@ -96,7 +96,7 @@
 
 ### Implementation for User Story 4
 
-- [x] T015 [US4] Fix `handleDeleteSession` in `backend/src/api/routes/sessions.ts` to call `sessionService.deleteSession(id)` instead of `store.sessions.delete(id)` — ensures PTY cleanup and SQLite cascade deletion
+- [ ] T015 [US4] Fix `handleDeleteSession` in `backend/src/api/routes/sessions.ts` to call `sessionService.deleteSession(id)` instead of `store.sessions.delete(id)` — ensures PTY cleanup and SQLite cascade deletion
 
 **Checkpoint**: Session deletion is consistent between in-memory state, PTYs, and database.
 
@@ -107,8 +107,8 @@
 **Purpose**: Improvements that affect multiple user stories.
 
 - [ ] T016 Add session switch keybindings (tmux `(` previous session, `)` next session) in `frontend/src/hooks/useKeyBindings.ts`
-- [x] T017 Run `npm run typecheck` and fix any type errors introduced by the changes
-- [x] T018 Run `npm run lint` and fix any lint violations
+- [ ] T017 Run `npm run typecheck` and fix any type errors introduced by the changes
+- [ ] T018 Run `npm run lint` and fix any lint violations
 
 ---
 

@@ -108,7 +108,7 @@
 
 - [ ] T016 Add session switch keybindings (tmux `(` previous session, `)` next session) in `frontend/src/hooks/useKeyBindings.ts`
 - [x] T017 Run `npm run typecheck` and fix any type errors introduced by the changes
-- [x] T018 Run `npm run lint` and fix any lint violations
+- [ ] T018 Run `npm run lint` and fix any lint violations
 
 ---
 

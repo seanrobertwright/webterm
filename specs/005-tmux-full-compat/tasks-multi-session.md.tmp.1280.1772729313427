@@ -96,7 +96,7 @@
 
 ### Implementation for User Story 4
 
-- [x] T015 [US4] Fix `handleDeleteSession` in `backend/src/api/routes/sessions.ts` to call `sessionService.deleteSession(id)` instead of `store.sessions.delete(id)` — ensures PTY cleanup and SQLite cascade deletion
+- [ ] T015 [US4] Fix `handleDeleteSession` in `backend/src/api/routes/sessions.ts` to call `sessionService.deleteSession(id)` instead of `store.sessions.delete(id)` — ensures PTY cleanup and SQLite cascade deletion
 
 **Checkpoint**: Session deletion is consistent between in-memory state, PTYs, and database.
 
@@ -107,8 +107,8 @@
 **Purpose**: Improvements that affect multiple user stories.
 
 - [ ] T016 Add session switch keybindings (tmux `(` previous session, `)` next session) in `frontend/src/hooks/useKeyBindings.ts`
-- [x] T017 Run `npm run typecheck` and fix any type errors introduced by the changes
-- [x] T018 Run `npm run lint` and fix any lint violations
+- [ ] T017 Run `npm run typecheck` and fix any type errors introduced by the changes
+- [ ] T018 Run `npm run lint` and fix any lint violations
 
 ---
 

@@ -23,7 +23,6 @@ import {
   updateSession as apiUpdateSession,
   createSession as apiCreateSession,
   fetchSessions,
-  fetchSession,
 } from './services/session-api';
 import { fetchKeybindings } from './services/keybinding-api';
 import { getWebSocketClient } from './services/websocket-client';

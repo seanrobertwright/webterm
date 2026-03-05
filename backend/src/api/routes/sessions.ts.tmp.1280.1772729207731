@@ -4,12 +4,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sendJson } from '../rest-router.js';
+import { sendJson, sendError } from '../rest-router.js';
 import { logger } from '../../utils/logger.js';
 import {
   NotFoundError,
   ValidationError,
   DuplicateError,
+  toErrorResponse,
 } from '../../utils/errors.js';
 import type {
   Session,
