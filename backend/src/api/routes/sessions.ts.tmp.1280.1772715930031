@@ -192,9 +192,9 @@ export async function handleUpdateSession(
     if (sessionService.sessionNameExists(name, id)) {
       throw new DuplicateError('Session', 'name', name);
     }
-
-    sessionService.updateSession(id, { name });
   }
+
+  sessionService.updateSession(id, { name });
 
   logger.info('Session updated', { id, name });
 

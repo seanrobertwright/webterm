@@ -12,6 +12,7 @@ import {
   DuplicateError,
   toErrorResponse,
 } from '../../utils/errors.js';
+import { randomUUID } from 'node:crypto';
 import type {
   Session,
   SessionWithWindows,
@@ -74,7 +75,18 @@ export async function handleListSessions(
 ): Promise<void> {
   logger.debug('Listing sessions');
 
-  const sessions = sessionService.getAllSessions();
+  const sessions: SessionListItem[] = [];
+
+  for (const session of store.sessions.values()) {
+    sessions.push({
+      id: session.id,
+      name: session.name,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      windowCount: session.windows.length,
+      paneCount: countPanes(session),
+    });
+  }
 
   // Sort by updatedAt descending
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -96,7 +108,7 @@ export async function handleGetSession(
 
   logger.debug('Getting session', { id });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
@@ -133,23 +145,36 @@ export async function handleCreateSession(
   }
 
   // Check for duplicate name
-  if (sessionService.sessionNameExists(name)) {
+  if (getSessionByName(name)) {
     throw new DuplicateError('Session', 'name', name);
   }
 
-  // Create session via service (persists to SQLite)
-  const session = sessionService.createSession({ name });
+  // Create session
+  const id = randomUUID();
+  const now = Date.now();
 
-  logger.info('Session created', { id: session.id, name: session.name });
+  const session: SessionWithWindows = {
+    id,
+    name,
+    createdAt: now,
+    updatedAt: now,
+    activeWindowId: null,
+    lastWindowId: null,
+    windows: [],
+  };
 
-  // Return created session
+  store.sessions.set(id, session);
+
+  logger.info('Session created', { id, name });
+
+  // Return created session (without windows for creation response)
   const response: Session = {
     id: session.id,
     name: session.name,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     activeWindowId: session.activeWindowId,
-    lastWindowId: session.lastWindowId ?? null,
+    lastWindowId: session.lastWindowId,
   };
 
   sendJson(res, 201, response);
@@ -169,7 +194,7 @@ export async function handleUpdateSession(
 
   logger.debug('Updating session', { id, body });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
@@ -189,28 +214,26 @@ export async function handleUpdateSession(
     }
 
     // Check for duplicate name (excluding current session)
-    if (sessionService.sessionNameExists(name, id)) {
+    const existingSession = getSessionByName(name);
+    if (existingSession && existingSession.id !== id) {
       throw new DuplicateError('Session', 'name', name);
     }
 
-    sessionService.updateSession(id, { name });
+    session.name = name;
   }
 
-  logger.info('Session updated', { id, name });
+  session.updatedAt = Date.now();
 
-  // Re-fetch updated session
-  const updated = sessionService.getSession(id);
-  if (!updated) {
-    throw new NotFoundError('Session', id);
-  }
+  logger.info('Session updated', { id, name: session.name });
 
+  // Return updated session summary
   const response: Session = {
-    id: updated.id,
-    name: updated.name,
-    createdAt: updated.createdAt,
-    updatedAt: updated.updatedAt,
-    activeWindowId: updated.activeWindowId,
-    lastWindowId: updated.lastWindowId ?? null,
+    id: session.id,
+    name: session.name,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    activeWindowId: session.activeWindowId,
+    lastWindowId: session.lastWindowId,
   };
 
   sendJson(res, 200, response);
@@ -230,14 +253,20 @@ export async function handleDeleteSession(
 
   logger.debug('Deleting session', { id });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  // sessionService.deleteSession kills all PTYs and cascade-deletes from SQLite
-  sessionService.deleteSession(id);
+  // TODO: Close all panes and windows first
+  // for (const window of session.windows) {
+  //   for (const pane of window.panes) {
+  //     await ptyService.closePane(pane.id);
+  //   }
+  // }
+
+  store.sessions.delete(id);
 
   logger.info('Session deleted', { id });
 
@@ -259,29 +288,28 @@ export async function handleSaveSession(
 
   logger.debug('Saving session', { id });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  sessionService.saveSession(id);
+  // Update timestamp
+  session.updatedAt = Date.now();
+
+  // TODO: Persist session state to database
+  // await database.saveSession(session);
 
   logger.info('Session saved', { id });
 
-  // Re-fetch to get updated timestamp
-  const saved = sessionService.getSession(id);
-  if (!saved) {
-    throw new NotFoundError('Session', id);
-  }
-
+  // Return session summary
   const response: SessionListItem = {
-    id: saved.id,
-    name: saved.name,
-    createdAt: saved.createdAt,
-    updatedAt: saved.updatedAt,
-    windowCount: saved.windows.length,
-    paneCount: saved.windows.reduce((count, w) => count + w.panes.length, 0),
+    id: session.id,
+    name: session.name,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    windowCount: session.windows.length,
+    paneCount: countPanes(session),
   };
 
   sendJson(res, 200, response);

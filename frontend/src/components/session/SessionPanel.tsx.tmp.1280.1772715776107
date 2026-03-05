@@ -12,7 +12,7 @@ export interface SessionPanelProps {
   onClose: () => void;
   onRestore: (sessionId: string) => void;
   onNewSession: () => void;
-  currentSessionId?: string | undefined;
+  currentSessionId?: string;
 }
 
 export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, currentSessionId }: SessionPanelProps) {
@@ -103,7 +103,6 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
             isLoading={isLoading}
             onRestore={handleRestore}
             onDelete={handleDelete}
-            currentSessionId={currentSessionId}
           />
         </div>
       </div>

@@ -184,16 +184,11 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     clientRef.current?.sendResize(paneId, cols, rows);
   }, []);
 
-  const switchSession = useCallback((newSessionId: string) => {
-    clientRef.current?.switchSession(newSessionId);
-  }, []);
-
   return {
     connectionState,
     sessionId,
     connect,
     disconnect,
-    switchSession,
     sendMessage,
     sendBinary,
     sendInput,

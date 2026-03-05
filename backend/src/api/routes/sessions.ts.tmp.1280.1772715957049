@@ -192,9 +192,13 @@ export async function handleUpdateSession(
     if (sessionService.sessionNameExists(name, id)) {
       throw new DuplicateError('Session', 'name', name);
     }
-
-    sessionService.updateSession(id, { name });
   }
+
+  const updates: Partial<Pick<Session, 'name' | 'activeWindowId'>> = {};
+  if (name !== undefined) {
+    updates.name = name;
+  }
+  sessionService.updateSession(id, updates);
 
   logger.info('Session updated', { id, name });
 

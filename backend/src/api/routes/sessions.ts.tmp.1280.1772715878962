@@ -12,6 +12,7 @@ import {
   DuplicateError,
   toErrorResponse,
 } from '../../utils/errors.js';
+import { randomUUID } from 'node:crypto';
 import type {
   Session,
   SessionWithWindows,
@@ -192,9 +193,9 @@ export async function handleUpdateSession(
     if (sessionService.sessionNameExists(name, id)) {
       throw new DuplicateError('Session', 'name', name);
     }
-
-    sessionService.updateSession(id, { name });
   }
+
+  sessionService.updateSession(id, { name });
 
   logger.info('Session updated', { id, name });
 
@@ -230,14 +231,20 @@ export async function handleDeleteSession(
 
   logger.debug('Deleting session', { id });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  // sessionService.deleteSession kills all PTYs and cascade-deletes from SQLite
-  sessionService.deleteSession(id);
+  // TODO: Close all panes and windows first
+  // for (const window of session.windows) {
+  //   for (const pane of window.panes) {
+  //     await ptyService.closePane(pane.id);
+  //   }
+  // }
+
+  store.sessions.delete(id);
 
   logger.info('Session deleted', { id });
 
@@ -259,29 +266,28 @@ export async function handleSaveSession(
 
   logger.debug('Saving session', { id });
 
-  const session = sessionService.getSession(id);
+  const session = getSessionById(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  sessionService.saveSession(id);
+  // Update timestamp
+  session.updatedAt = Date.now();
+
+  // TODO: Persist session state to database
+  // await database.saveSession(session);
 
   logger.info('Session saved', { id });
 
-  // Re-fetch to get updated timestamp
-  const saved = sessionService.getSession(id);
-  if (!saved) {
-    throw new NotFoundError('Session', id);
-  }
-
+  // Return session summary
   const response: SessionListItem = {
-    id: saved.id,
-    name: saved.name,
-    createdAt: saved.createdAt,
-    updatedAt: saved.updatedAt,
-    windowCount: saved.windows.length,
-    paneCount: saved.windows.reduce((count, w) => count + w.panes.length, 0),
+    id: session.id,
+    name: session.name,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    windowCount: session.windows.length,
+    paneCount: countPanes(session),
   };
 
   sendJson(res, 200, response);

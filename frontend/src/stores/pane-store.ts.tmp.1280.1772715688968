@@ -378,10 +378,6 @@ export const usePaneStore = create<PaneStore>()(
       reset: () => {
         set(initialState, false, 'reset');
       },
-
-      resetForSessionSwitch: () => {
-        set(initialState, false, 'resetForSessionSwitch');
-      },
     })),
     { name: 'pane-store' }
   )

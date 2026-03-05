@@ -317,22 +317,6 @@ export const useSessionStore = create<SessionStore>()(
           reset: () => {
             set(initialState, false, 'reset');
           },
-
-          resetForSessionSwitch: () => {
-            set(
-              (state) => ({
-                currentSession: null,
-                windows: [],
-                activeWindowId: null,
-                error: null,
-                // Preserve savedSessions and isLoading
-                savedSessions: state.savedSessions,
-                isLoading: state.isLoading,
-              }),
-              false,
-              'resetForSessionSwitch'
-            );
-          },
         }),
         {
           name: 'webterm-session-store',

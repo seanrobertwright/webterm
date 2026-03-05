@@ -11,7 +11,7 @@ export interface SessionListProps {
   /** Callback when delete button is clicked */
   onDelete: (sessionId: string) => void;
   /** ID of the currently active session (cannot be deleted) */
-  currentSessionId?: string | undefined;
+  currentSessionId?: string;
   /** Additional CSS classes */
   className?: string;
 }
@@ -171,17 +171,15 @@ export function SessionList({
             </button>
             <button
               onClick={() => handleDelete(session.id)}
-              disabled={isActive}
-              className={`
+              className="
                 p-2
+                text-gray-400 hover:text-red-400
                 rounded-md
                 transition-colors
                 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900
-                ${isActive ? 'text-gray-600 cursor-not-allowed' : 'text-gray-400 hover:text-red-400'}
-              `}
+              "
               type="button"
-              title={isActive ? 'Cannot delete active session' : `Delete session ${session.name}`}
-              aria-label={isActive ? 'Cannot delete active session' : `Delete session ${session.name}`}
+              aria-label={`Delete session ${session.name}`}
             >
               <svg
                 className="w-5 h-5"
@@ -200,8 +198,7 @@ export function SessionList({
             </button>
           </div>
         </div>
-        );
-      })}
+      ))}
     </div>
   );
 }

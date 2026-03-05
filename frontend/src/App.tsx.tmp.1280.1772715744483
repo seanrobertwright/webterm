@@ -430,8 +430,7 @@ function App() {
         isOpen={showSessionPanel}
         onClose={() => setShowSessionPanel(false)}
         onRestore={handleRestoreSession}
-        onNewSession={handleNewSession}
-        currentSessionId={getSessionId() ?? undefined}
+        onNewSession={handleNewWindow}
       />
 
       {/* Settings Panel */}

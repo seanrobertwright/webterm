@@ -305,32 +305,16 @@ function App() {
     }
   }, [getSessionId, updateSession]);
 
-  // Create a new independent session
-  const handleNewSession = useCallback(async () => {
-    try {
-      const session = await apiCreateSession();
-      useSessionStore.getState().resetForSessionSwitch();
-      usePaneStore.getState().resetForSessionSwitch();
-      switchSession(session.id);
-      // Refresh saved sessions list after switch
-      fetchSessions()
-        .then(setSavedSessions)
-        .catch((err) => console.error('[App] Failed to refresh sessions:', err));
-    } catch (err) {
-      console.error('[App] Failed to create new session:', err);
-    }
-  }, [switchSession, setSavedSessions]);
-
-  // T004: Restore/switch to existing session
+  // T004: Restore session
   const handleRestoreSession = useCallback(async (restoreSessionId: string) => {
     try {
-      useSessionStore.getState().resetForSessionSwitch();
-      usePaneStore.getState().resetForSessionSwitch();
-      switchSession(restoreSessionId);
+      const session = await fetchSession(restoreSessionId);
+      // TODO: Switch WebSocket to the restored session
+      console.log('[App] Session restored:', session.id);
     } catch (err) {
       console.error('[App] Failed to restore session:', err);
     }
-  }, [switchSession]);
+  }, []);
 
   // Handle context menu command from pane right-click
   const handleContextMenuCommand = useCallback(
@@ -430,8 +414,7 @@ function App() {
         isOpen={showSessionPanel}
         onClose={() => setShowSessionPanel(false)}
         onRestore={handleRestoreSession}
-        onNewSession={handleNewSession}
-        currentSessionId={getSessionId() ?? undefined}
+        onNewSession={handleNewWindow}
       />
 
       {/* Settings Panel */}

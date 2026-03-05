@@ -11,7 +11,7 @@ export interface SessionListProps {
   /** Callback when delete button is clicked */
   onDelete: (sessionId: string) => void;
   /** ID of the currently active session (cannot be deleted) */
-  currentSessionId?: string | undefined;
+  currentSessionId?: string;
   /** Additional CSS classes */
   className?: string;
 }
@@ -200,8 +200,7 @@ export function SessionList({
             </button>
           </div>
         </div>
-        );
-      })}
+      ))}
     </div>
   );
 }
