@@ -14,8 +14,7 @@
       "Bash(npm run:*)",
       "Bash(npx eslint:*)",
       "mcp__rlm-navigator__get_status",
-      "Bash(powershell:*)",
-      "Bash(npm test:*)"
+      "Bash(powershell:*)"
     ]
   }
 }
