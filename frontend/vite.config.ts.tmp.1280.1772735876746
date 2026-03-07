@@ -4,9 +4,13 @@ import path from 'path';
 
 const backendHost = process.env.BACKEND_HOST ?? 'localhost';
 const backendUrl = `http://${backendHost}:9174`;
+const backendWsUrl = `ws://${backendHost}:9174/ws`;
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __DEV_WS_URL__: JSON.stringify(backendWsUrl),
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -43,6 +43,14 @@ export interface WebSocketCallbacks {
   onError?: (error: Error) => void;
 }
 
+const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
+  url: getDefaultWebSocketUrl(),
+  maxReconnectAttempts: Infinity,
+  initialReconnectDelay: 1000,
+  maxReconnectDelay: 30000,
+  reconnectBackoffMultiplier: 2,
+};
+
 /** Backend port for direct WebSocket connection in dev mode */
 const DEV_BACKEND_PORT = 9174;
 
@@ -56,14 +64,6 @@ function getDefaultWebSocketUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws`;
 }
-
-const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
-  url: getDefaultWebSocketUrl(),
-  maxReconnectAttempts: Infinity,
-  initialReconnectDelay: 1000,
-  maxReconnectDelay: 30000,
-  reconnectBackoffMultiplier: 2,
-};
 
 /**
  * WebSocket client for terminal communication

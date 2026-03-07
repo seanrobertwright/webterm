@@ -43,20 +43,6 @@ export interface WebSocketCallbacks {
   onError?: (error: Error) => void;
 }
 
-/** Backend port for direct WebSocket connection in dev mode */
-const DEV_BACKEND_PORT = 9174;
-
-/** Get default WebSocket URL based on environment */
-function getDefaultWebSocketUrl(): string {
-  // In dev mode, connect directly to backend to bypass Vite proxy
-  // (Vite's WS proxy doesn't recover after backend restarts)
-  if (import.meta.env.DEV) {
-    return `ws://${window.location.hostname}:${DEV_BACKEND_PORT}/ws`;
-  }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
-}
-
 const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
   url: getDefaultWebSocketUrl(),
   maxReconnectAttempts: Infinity,
@@ -64,6 +50,17 @@ const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
   maxReconnectDelay: 30000,
   reconnectBackoffMultiplier: 2,
 };
+
+/** Get default WebSocket URL based on environment */
+function getDefaultWebSocketUrl(): string {
+  // In dev mode, connect directly to backend to avoid Vite proxy WS reconnection issues
+  const wsUrl = import.meta.env.VITE_WS_URL;
+  if (wsUrl) {
+    return wsUrl;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
 
 /**
  * WebSocket client for terminal communication

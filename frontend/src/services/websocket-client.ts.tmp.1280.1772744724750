@@ -57,14 +57,6 @@ function getDefaultWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
-  url: getDefaultWebSocketUrl(),
-  maxReconnectAttempts: Infinity,
-  initialReconnectDelay: 1000,
-  maxReconnectDelay: 30000,
-  reconnectBackoffMultiplier: 2,
-};
-
 /**
  * WebSocket client for terminal communication
  * Handles binary and JSON protocol with automatic reconnection
