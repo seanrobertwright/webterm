@@ -508,6 +508,15 @@ export interface WindowRenamedMessage {
   };
 }
 
+/** Session renamed */
+export interface SessionRenamedMessage {
+  type: 'sessionRenamed';
+  payload: {
+    sessionId: string;
+    name: string;
+  };
+}
+
 /** Paste buffer content sent to client (for writing to active pane) */
 export interface PasteFromBufferMessage {
   type: 'pasteFromBuffer';
@@ -539,6 +548,7 @@ export type ServerMessage =
   | SessionDetachedMessage
   | OptionChangedMessage
   | WindowRenamedMessage
+  | SessionRenamedMessage
   | PasteFromBufferMessage;
 
 // ============================================================================

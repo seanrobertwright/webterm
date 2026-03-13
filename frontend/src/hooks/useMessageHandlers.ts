@@ -134,6 +134,15 @@ export function useMessageHandlers(): void {
           break;
         }
 
+        case 'sessionRenamed': {
+          const { sessionId, name } = message.payload;
+          const currentSession = useSessionStore.getState().currentSession;
+          if (currentSession && currentSession.id === sessionId) {
+            setSession({ ...currentSession, name });
+          }
+          break;
+        }
+
         case 'pasteFromBuffer': {
           // Server pushed paste buffer content — write it to the active pane as input
           const { content } = message.payload;

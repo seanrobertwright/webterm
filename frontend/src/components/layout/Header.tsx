@@ -83,7 +83,7 @@ export function Header({
       className={`
         flex items-center justify-between
         h-10 px-4
-        bg-gray-950 border-b border-gray-800
+        bg-card border-b border-border
         ${className}
       `}
     >
@@ -98,7 +98,7 @@ export function Header({
           onClick={onMenuClick}
           className="
             p-2
-            text-gray-400 hover:text-primary
+            text-muted-foreground hover:text-primary
             rounded
             transition-colors
             focus:outline-none focus:ring-2 focus:ring-ring/50
@@ -135,7 +135,7 @@ export function Header({
           maxLength={50}
           className="
             text-lg font-bold text-primary
-            bg-gray-800 border border-primary
+            bg-input border border-primary
             rounded px-2 py-0.5
             focus:outline-none focus:ring-2 focus:ring-ring
             text-center
@@ -162,17 +162,18 @@ export function Header({
         </button>
       )}
 
-      {/* Right: Settings + Connection status */}
+      {/* Right: Theme selector + Settings + Connection status */}
       <div className="flex items-center gap-2">
+        <ThemeSelector />
         {onSettingsClick && (
           <button
             onClick={onSettingsClick}
             className="
               p-2
-              text-gray-400 hover:text-green-400
+              text-muted-foreground hover:text-primary
               rounded
               transition-colors
-              focus:outline-none focus:ring-2 focus:ring-green-500/50
+              focus:outline-none focus:ring-2 focus:ring-ring/50
             "
             type="button"
             aria-label="Open settings"

@@ -74,7 +74,7 @@ export class CommandService {
         case 'new-session':
           return this.handleNewSession(parsed, ctx);
         case 'rename-session':
-          return this.stubSuccess();
+          return this.handleRenameSession(parsed, ctx);
         case 'detach-client':
           return this.handleDetachClient();
         case 'switch-client':
@@ -96,7 +96,7 @@ export class CommandService {
         case 'new-window':
           return this.handleNewWindow(parsed, ctx);
         case 'kill-window':
-          return this.stubSuccess();
+          return this.handleKillWindow(parsed, ctx);
         case 'rename-window':
           return this.handleRenameWindow(parsed, ctx);
         case 'select-window':
@@ -104,9 +104,9 @@ export class CommandService {
         case 'last-window':
           return this.handleLastWindow(ctx);
         case 'next-window':
-          return this.stubSuccess();
+          return this.handleNextWindow(ctx);
         case 'previous-window':
-          return this.stubSuccess();
+          return this.handlePreviousWindow(ctx);
         case 'swap-window':
           return this.handleSwapWindow(parsed, ctx);
         case 'move-window':
@@ -198,7 +198,7 @@ export class CommandService {
         case 'display-popup':
           return this.handleDisplayPopup(parsed);
         case 'clock-mode':
-          return this.stubSuccess();
+          return this.handleClockMode(parsed, ctx);
         case 'capture-pane':
           return this.handleCapturePane(parsed, ctx);
 
@@ -2071,6 +2071,165 @@ export class CommandService {
     }
 
     return { output: session.id, success: true };
+  }
+
+  /**
+   * rename-session: Rename the current or target session.
+   *
+   * Positional: new name
+   * Flags: -t (target session)
+   */
+  private handleRenameSession(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    let sessionId = ctx.sessionId;
+
+    if (typeof targetFlag === 'string') {
+      const sessions = sessionService.getAllSessions();
+      const found = sessions.find((s) => s.id === targetFlag || s.name === targetFlag);
+      if (!found) {
+        return { output: `session not found: ${targetFlag}`, success: false };
+      }
+      sessionId = found.id;
+    }
+
+    const newName = parsed.positional[0];
+    if (newName === undefined) {
+      return { output: 'Missing session name argument', success: false };
+    }
+
+    const updated = sessionService.updateSession(sessionId, { name: newName });
+    if (!updated) {
+      return { output: `Session not found: ${sessionId}`, success: false };
+    }
+
+    broadcastToSession(sessionId, {
+      type: 'sessionRenamed',
+      payload: { sessionId, name: newName },
+    });
+
+    logger.info('rename-session: session renamed', { sessionId, newName });
+    return { output: '', success: true };
+  }
+
+  /**
+   * kill-window: Kill a window and all its panes.
+   *
+   * Flags: -t (target window), -a (kill all other windows)
+   */
+  private handleKillWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const killAllOthers = parsed.flags.get('a') === true;
+
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    if (killAllOthers) {
+      // Kill all windows except the target/current
+      const keepWindowId = typeof targetFlag === 'string' ? targetFlag : ctx.windowId;
+      for (const win of session.windows) {
+        if (win.id !== keepWindowId) {
+          sessionService.deleteWindow(win.id);
+          broadcastToSession(ctx.sessionId, {
+            type: 'windowClosed',
+            payload: { windowId: win.id },
+          });
+        }
+      }
+      logger.info('kill-window: killed all windows except', { keepWindowId });
+      return { output: '', success: true };
+    }
+
+    const windowId = typeof targetFlag === 'string' ? targetFlag : ctx.windowId;
+    const window = sessionService.getWindow(windowId);
+    if (!window) {
+      return { output: `Window not found: ${windowId}`, success: false };
+    }
+
+    // Kill all PTYs in this window
+    const paneIds = getPaneIds(window.layout);
+    for (const pid of paneIds) {
+      if (ptyManager.hasPty(pid)) {
+        ptyManager.kill(pid);
+      }
+    }
+
+    sessionService.deleteWindow(windowId);
+
+    broadcastToSession(ctx.sessionId, {
+      type: 'windowClosed',
+      payload: { windowId },
+    });
+
+    logger.info('kill-window: window killed', { windowId });
+    return { output: '', success: true };
+  }
+
+  /**
+   * next-window: Switch to the next window in the session.
+   */
+  private handleNextWindow(ctx: CommandContext): CommandResult {
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    if (session.windows.length <= 1) {
+      return { output: '', success: true };
+    }
+
+    const currentIdx = session.windows.findIndex((w) => w.id === ctx.windowId);
+    const nextIdx = (currentIdx + 1) % session.windows.length;
+    const nextWindow = session.windows[nextIdx];
+
+    if (!nextWindow) {
+      return { output: 'No next window', success: false };
+    }
+
+    return { output: nextWindow.id, success: true };
+  }
+
+  /**
+   * previous-window: Switch to the previous window in the session.
+   */
+  private handlePreviousWindow(ctx: CommandContext): CommandResult {
+    const session = sessionService.getSession(ctx.sessionId);
+    if (!session) {
+      return { output: 'Session not found', success: false };
+    }
+
+    if (session.windows.length <= 1) {
+      return { output: '', success: true };
+    }
+
+    const currentIdx = session.windows.findIndex((w) => w.id === ctx.windowId);
+    const prevIdx = (currentIdx - 1 + session.windows.length) % session.windows.length;
+    const prevWindow = session.windows[prevIdx];
+
+    if (!prevWindow) {
+      return { output: 'No previous window', success: false };
+    }
+
+    return { output: prevWindow.id, success: true };
+  }
+
+  /**
+   * clock-mode: Display a large clock in the target pane.
+   *
+   * Broadcasts a clockMode message to the session so the frontend
+   * can show the ClockMode component overlay on the target pane.
+   */
+  private handleClockMode(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    const paneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
+
+    broadcastToSession(ctx.sessionId, {
+      type: 'clockMode',
+      payload: { paneId },
+    });
+
+    return { output: '', success: true };
   }
 
   /**

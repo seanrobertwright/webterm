@@ -29,7 +29,9 @@ defaultRegistry
     name: 'rename-session',
     aliases: ['rename'],
     description: 'Rename current session',
-    flags: [],
+    flags: [
+      { short: 't', takesValue: true, description: 'Target session' },
+    ],
     args: [{ name: 'name', required: true }],
   })
   .register({
@@ -118,6 +120,7 @@ defaultRegistry
     description: 'Kill current window',
     flags: [
       { short: 't', takesValue: true, description: 'Target window' },
+      { short: 'a', takesValue: false, description: 'Kill all other windows' },
     ],
     args: [],
   })
