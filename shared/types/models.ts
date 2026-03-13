@@ -89,6 +89,39 @@ export interface CreatePaneOptions {
   rows?: number;
 }
 
+// ============================================================================
+// Session Export Types
+// ============================================================================
+
+/** Pane data included in a session export */
+export interface SessionExportPane {
+  id: string;
+  shell: ShellType;
+  cwd: string | null;
+  cols: number;
+  rows: number;
+  title: string;
+}
+
+/** Window data included in a session export */
+export interface SessionExportWindow {
+  name: string;
+  index: number;
+  layout: Layout;
+  panes: SessionExportPane[];
+}
+
+/** Full session export with structure and scrollback */
+export interface SessionExport {
+  version: 1;
+  exportedAt: number;
+  session: {
+    name: string;
+    windows: SessionExportWindow[];
+  };
+  scrollback: Record<string, string>;
+}
+
 /** Session list item (summary without full details) */
 export interface SessionListItem {
   id: string;

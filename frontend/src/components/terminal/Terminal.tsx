@@ -4,6 +4,7 @@ import type { ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalHandle {
@@ -19,6 +20,8 @@ export interface TerminalHandle {
   getSelection: () => string;
   /** Check if the terminal has a selection */
   hasSelection: () => boolean;
+  /** Serialize terminal content (scrollback + visible) */
+  serialize: () => string | null;
 }
 
 export interface TerminalProps {
@@ -85,6 +88,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const fitAddonRef = useRef<FitAddon | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const serializeAddonRef = useRef<SerializeAddon | null>(null);
     const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onTitleChangeRef = useRef(onTitleChange);
 
@@ -107,6 +111,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         }),
         getSelection: () => terminalRef.current?.getSelection() ?? '',
         hasSelection: () => terminalRef.current?.hasSelection() ?? false,
+        serialize: () => serializeAddonRef.current?.serialize() ?? null,
       }),
       []
     );
@@ -194,6 +199,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       const webLinksAddon = new WebLinksAddon();
       terminal.loadAddon(webLinksAddon);
 
+      // Load serialize addon for scrollback capture
+      const serializeAddn = new SerializeAddon();
+      serializeAddonRef.current = serializeAddn;
+      terminal.loadAddon(serializeAddn);
+
       // Initial fit
       requestAnimationFrame(() => {
         try {
@@ -236,6 +246,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
+        serializeAddonRef.current = null;
       };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [onData, onResize, debouncedFit]);
