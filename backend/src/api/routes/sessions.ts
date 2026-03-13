@@ -14,6 +14,7 @@ import {
 import type {
   Session,
   SessionWithWindows,
+  SessionExport,
   SessionListItem,
   WindowWithPanes,
 } from '@webterm/shared/models';
@@ -216,6 +217,48 @@ export async function handleClearAllSessions(
   logger.info('All sessions cleared', { keepSessionId, deleted });
 
   sendJson(res, 200, { deleted });
+}
+
+/**
+ * POST /api/v1/sessions/import
+ * Import a session from an export JSON payload
+ */
+export async function handleImportSession(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  body: unknown
+): Promise<void> {
+  logger.debug('Importing session', { body: typeof body });
+
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Request body is required', 'body', 'required');
+  }
+
+  const data = body as Record<string, unknown>;
+
+  if (data['version'] !== 1) {
+    throw new ValidationError('Unsupported export version (expected 1)', 'version', 'invalid');
+  }
+
+  const session = data['session'] as Record<string, unknown> | undefined;
+  if (!session || typeof session !== 'object') {
+    throw new ValidationError('session object is required', 'session', 'required');
+  }
+
+  if (!session['name'] || typeof session['name'] !== 'string') {
+    throw new ValidationError('session.name is required', 'session.name', 'required');
+  }
+
+  if (!Array.isArray(session['windows']) || session['windows'].length === 0) {
+    throw new ValidationError('session.windows must be a non-empty array', 'session.windows', 'required');
+  }
+
+  const result = sessionService.importSession(body as SessionExport);
+
+  logger.info('Session imported', { id: result.session.id, name: result.session.name });
+
+  sendJson(res, 201, result);
 }
 
 /**

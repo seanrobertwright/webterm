@@ -8,15 +8,16 @@ import { getDatabase, transaction } from '../db/database.js';
 import { ptyManager } from './pty-service.js';
 import { createLeafLayout, serializeLayout, parseLayout } from './layout-service.js';
 import { logger } from '../utils/logger.js';
-import type { 
-  Session, 
-  SessionWithWindows, 
-  Window, 
-  WindowWithPanes, 
-  Pane, 
+import type {
+  Session,
+  SessionWithWindows,
+  SessionExport,
+  Window,
+  WindowWithPanes,
+  Pane,
   Layout,
   SessionListItem,
-  ShellType 
+  ShellType
 } from '../../../shared/types/models.js';
 
 /** Session creation options */
@@ -366,6 +367,143 @@ export class SessionService {
     // Delete all sessions except the excluded one (CASCADE handles windows/panes)
     const result = db.prepare('DELETE FROM sessions WHERE id != ?').run(excludeId);
     return result.changes;
+  }
+
+  /**
+   * Import a session from an export payload.
+   * Creates a new session with the exported structure (windows, panes, layout).
+   * Returns the created session and a mapping of old pane IDs to new pane IDs
+   * so the frontend can replay scrollback to the correct terminals.
+   */
+  importSession(data: SessionExport): { session: SessionWithWindows; paneIdMap: Record<string, string> } {
+    const db = getDatabase();
+    const now = Date.now();
+    const paneIdMap: Record<string, string> = {};
+
+    // Ensure unique name — reuse the same dedup logic as createSession
+    let name = data.session.name;
+    let suffix = 1;
+    while (
+      (db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name = ?').get(name) as { count: number }).count > 0
+    ) {
+      suffix++;
+      name = `${data.session.name} ${suffix}`;
+    }
+
+    const sessionId = uuidv4();
+
+    return transaction(() => {
+      // Create session shell (no active window yet)
+      db.prepare(`
+        INSERT INTO sessions (id, name, created_at, updated_at, active_window_id)
+        VALUES (?, ?, ?, ?, NULL)
+      `).run(sessionId, name, now, now);
+
+      let firstWindowId: string | null = null;
+      const allWindows: WindowWithPanes[] = [];
+
+      for (const exportWindow of data.session.windows) {
+        const windowId = uuidv4();
+        if (firstWindowId === null) {
+          firstWindowId = windowId;
+        }
+
+        // Create panes and build ID mapping
+        const newPanes: Pane[] = [];
+        for (const exportPane of exportWindow.panes) {
+          const newPaneId = uuidv4();
+          paneIdMap[exportPane.id] = newPaneId;
+
+          db.prepare(`
+            INSERT INTO panes (id, window_id, shell, cwd, cols, rows, connection_state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(newPaneId, windowId, exportPane.shell, exportPane.cwd ?? null, exportPane.cols, exportPane.rows, 'disconnected', now);
+
+          newPanes.push({
+            id: newPaneId,
+            windowId,
+            shell: exportPane.shell,
+            cwd: exportPane.cwd,
+            cols: exportPane.cols,
+            rows: exportPane.rows,
+            connectionState: 'disconnected',
+            exitCode: null,
+            createdAt: now,
+            title: exportPane.title ?? '',
+            marked: false,
+            currentCommand: null,
+          });
+        }
+
+        // Remap pane IDs in the layout tree
+        const remappedLayout = this.remapLayoutPaneIds(exportWindow.layout, paneIdMap);
+
+        db.prepare(`
+          INSERT INTO windows (id, session_id, name, idx, layout, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(windowId, sessionId, exportWindow.name, exportWindow.index, serializeLayout(remappedLayout), now);
+
+        allWindows.push({
+          id: windowId,
+          sessionId,
+          name: exportWindow.name,
+          index: exportWindow.index,
+          layout: remappedLayout,
+          panes: newPanes,
+          createdAt: now,
+          autoRename: true,
+          lastActiveAt: now,
+          monitorActivity: false,
+          monitorSilence: 0,
+          monitorBell: true,
+          activityFlag: false,
+          bellFlag: false,
+          silenceFlag: false,
+        });
+      }
+
+      // Set active window to the first one
+      if (firstWindowId) {
+        db.prepare('UPDATE sessions SET active_window_id = ? WHERE id = ?').run(firstWindowId, sessionId);
+      }
+
+      const session: SessionWithWindows = {
+        id: sessionId,
+        name,
+        createdAt: now,
+        updatedAt: now,
+        activeWindowId: firstWindowId,
+        lastWindowId: null,
+        windows: allWindows,
+      };
+
+      return { session, paneIdMap };
+    });
+  }
+
+  /**
+   * Recursively remap pane IDs in a layout tree using the given ID mapping.
+   */
+  private remapLayoutPaneIds(layout: Layout, paneIdMap: Record<string, string>): Layout {
+    if (layout.type === 'leaf' && layout.paneId) {
+      return {
+        type: 'leaf',
+        paneId: paneIdMap[layout.paneId] ?? layout.paneId,
+      };
+    }
+
+    if (layout.children) {
+      const remapped: Layout = {
+        type: layout.type,
+        children: layout.children.map((child) => this.remapLayoutPaneIds(child, paneIdMap)),
+      };
+      if (layout.sizes) {
+        remapped.sizes = [...layout.sizes];
+      }
+      return remapped;
+    }
+
+    return { ...layout };
   }
 
   /**
