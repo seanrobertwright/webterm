@@ -89,17 +89,17 @@ export function Header({
     >
       {/* Left: Logo + Menu button */}
       <div className="flex items-center gap-1">
-        <svg className="w-5 h-5 text-primary" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <rect x="3" y="3" width="7" height="7" rx="1" />
-          <rect x="14" y="3" width="7" height="7" rx="1" />
-          <rect x="3" y="14" width="7" height="7" rx="1" />
-          <rect x="14" y="14" width="7" height="7" rx="1" />
-        </svg>
+        <img
+          src="/webterm-logo.png"
+          alt="WebTerm"
+          className="w-5 h-5 drop-shadow-[0_0_4px_var(--glow-muted)]"
+        />
         <button
           onClick={onMenuClick}
           className="
             p-2
             text-primary hover:brightness-125
+            drop-shadow-[0_0_4px_var(--glow-muted)]
             rounded
             transition-colors
             focus:outline-none focus:ring-2 focus:ring-ring/50
@@ -148,7 +148,7 @@ export function Header({
         <button
           onClick={handleNameClick}
           className="
-            glitch-text
+            glow-text
             text-lg font-bold
             text-primary
             hover:brightness-125
@@ -173,6 +173,7 @@ export function Header({
             className="
               p-2
               text-primary hover:brightness-125
+              drop-shadow-[0_0_4px_var(--glow-muted)]
               rounded
               transition-colors
               focus:outline-none focus:ring-2 focus:ring-ring/50
