@@ -41,6 +41,7 @@ coverage/
 
 # Temp
 *.tmp
+*.tmp.*
 .temp/
 .cache/
 
