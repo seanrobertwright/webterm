@@ -17,9 +17,9 @@ Add session management capabilities to the hamburger menu: bulk session cleanup 
 **Plans:** 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Clear All Sessions with confirmation dialog
-- [ ] 01-02-PLAN.md — Per-session JSON export with scrollback capture
-- [ ] 01-03-PLAN.md — Session import from exported JSON files
+- [x] 01-01-PLAN.md — Clear All Sessions with confirmation dialog
+- [x] 01-02-PLAN.md — Per-session JSON export with scrollback capture
+- [x] 01-03-PLAN.md — Session import from exported JSON files
 
 **Scope:**
 - "Clear All Sessions" button in the hamburger menu's session list
@@ -44,6 +44,31 @@ Plans:
 - Auto-export / scheduled backups
 - Cloud sync / remote storage
 - Sharing sessions between users
+
+---
+
+## Phase 2: Settings & UI Refinements
+
+**Goal:** Refactor settings panel and polish header UI — remove color theme from settings, add default start directory setting, improve connection status indicators, and replace the placeholder logo with the actual Webterm SVG logo (theme-colorable).
+
+**Plans:** TBD
+
+**Scope:**
+- Remove "Color Theme" section from settings panel (theme selector in header stays)
+- Add "Default Start Directory" setting — new terminals open in specified directory, falls back to OS default if blank
+- Connection status indicator: green dot for connected, red dot for disconnected
+- Replace placeholder logo SVG in header with actual `Webterm Logo.svg`, tinted to match active theme color
+
+**Success criteria:**
+- Settings panel has no color theme section
+- Default start directory is persisted and applied when spawning new PTY sessions
+- Connection badge shows colored dot indicators (green/red)
+- Header logo uses the Webterm Logo SVG, colored to match theme
+
+**Not in scope:**
+- New theme creation
+- Logo upload/customization
+- Settings import/export
 
 ---
 
