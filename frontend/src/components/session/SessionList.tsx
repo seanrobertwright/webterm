@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { SessionListItem } from '@webterm/shared/models';
+import { exportSession } from '../../services/export-service';
 
 export interface SessionListProps {
   /** Array of sessions to display */
@@ -50,6 +51,19 @@ export function SessionList({
     },
     [onDelete]
   );
+
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  const handleExport = useCallback(async (sessionId: string) => {
+    setExportingId(sessionId);
+    try {
+      await exportSession(sessionId);
+    } catch (err) {
+      console.error('[SessionList] Export failed:', err);
+    } finally {
+      setExportingId(null);
+    }
+  }, []);
 
   if (isLoading) {
     return (
@@ -168,6 +182,35 @@ export function SessionList({
               aria-label={`Restore session ${session.name}`}
             >
               Restore
+            </button>
+            <button
+              onClick={() => void handleExport(session.id)}
+              disabled={exportingId === session.id}
+              className={`
+                p-2
+                rounded-md
+                transition-colors
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900
+                ${exportingId === session.id ? 'text-gray-600 cursor-not-allowed' : 'text-gray-400 hover:text-blue-400'}
+              `}
+              type="button"
+              title={`Export session ${session.name}`}
+              aria-label={`Export session ${session.name}`}
+            >
+              <svg
+                className={`w-5 h-5 ${exportingId === session.id ? 'animate-pulse' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
             </button>
             <button
               onClick={() => handleDelete(session.id)}
