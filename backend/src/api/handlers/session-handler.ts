@@ -43,16 +43,17 @@ export async function handleCreateWindow(
   ctx: SessionHandlerContext,
   message: CreateWindowMessage
 ): Promise<void> {
-  const { sessionId, name } = message.payload;
+  const { sessionId, name, cwd } = message.payload;
 
-  logger.debug('Creating window', { sessionId, name });
+  logger.debug('Creating window', { sessionId, name, cwd });
 
   try {
     // Create window via session service (persists to DB)
     const window = sessionService.createWindow(
       sessionId,
       name ?? `Window ${Date.now()}`,
-      'default'
+      'default',
+      cwd
     );
 
     if (!window) {
@@ -67,6 +68,7 @@ export async function handleCreateWindow(
         shell: 'default',
         cols: initialPane.cols,
         rows: initialPane.rows,
+        ...(cwd !== undefined ? { cwd } : {}),
       });
       // Update connection state
       initialPane.connectionState = 'connected';

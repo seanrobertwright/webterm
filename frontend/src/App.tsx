@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSettingsStore } from './stores/settings-store';
 import { useShallow } from 'zustand/react/shallow';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PaneContainer } from './components/layout/PaneContainer';
@@ -160,7 +161,14 @@ function App() {
         case 'newWindow': {
           const sid = getSessionId();
           if (sid) {
-            sendMessage({ type: 'createWindow', payload: { sessionId: sid } });
+            const defaultStartDir = useSettingsStore.getState().defaultStartDir;
+            sendMessage({
+              type: 'createWindow',
+              payload: {
+                sessionId: sid,
+                ...(defaultStartDir ? { cwd: defaultStartDir } : {}),
+              },
+            });
           }
           break;
         }
@@ -291,7 +299,14 @@ function App() {
   const handleNewWindow = useCallback(() => {
     const sid = getSessionId();
     if (sid) {
-      sendMessage({ type: 'createWindow', payload: { sessionId: sid } });
+      const defaultStartDir = useSettingsStore.getState().defaultStartDir;
+      sendMessage({
+        type: 'createWindow',
+        payload: {
+          sessionId: sid,
+          ...(defaultStartDir ? { cwd: defaultStartDir } : {}),
+        },
+      });
     }
   }, [getSessionId, sendMessage]);
 

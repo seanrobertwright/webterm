@@ -86,6 +86,7 @@ export interface CreateWindowMessage {
   payload: {
     sessionId: string;
     name?: string;
+    cwd?: string;
   };
 }
 

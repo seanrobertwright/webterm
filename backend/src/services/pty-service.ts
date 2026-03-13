@@ -4,6 +4,7 @@
  */
 
 import * as pty from '@lydell/node-pty';
+import * as fs from 'node:fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -113,12 +114,19 @@ export class PtyManager {
   spawn(paneId: string, options: PtySpawnOptions = {}): PtyInstance {
     const {
       shell,
-      cwd = os.homedir(),
       cols = DEFAULT_COLS,
       rows = DEFAULT_ROWS,
       env,
       sessionId,
     } = options;
+
+    let cwd = options.cwd ?? os.homedir();
+
+    // Safety net: fall back to home directory if configured cwd is invalid
+    if (cwd && cwd !== os.homedir() && !fs.existsSync(cwd)) {
+      logger.warn(`Configured cwd does not exist: ${cwd}, falling back to home directory`);
+      cwd = os.homedir();
+    }
 
     // Resolve shell path
     let shellPath: string;
@@ -159,9 +167,17 @@ export class PtyManager {
     // Prepare shell arguments
     let shellArgs: string[] = [];
     
-    // PowerShell-specific args for better terminal behavior
+    // PowerShell-specific args: inject custom prompt that emits OSC title with CWD
+    // ConPTY doesn't translate SetConsoleTitle to OSC sequences, so we emit them explicitly.
     if (shellPath.includes('powershell') || shellPath.includes('pwsh')) {
-      shellArgs = ['-NoLogo'];
+      const promptFn = [
+        'function prompt {',
+        '  $p = $executionContext.SessionState.Path.CurrentLocation.Path;',
+        '  Write-Host -NoNewline "$([char]27)]0;$p$([char]7)";',
+        '  "PS $p> "',
+        '}',
+      ].join(' ');
+      shellArgs = ['-NoLogo', '-NoExit', '-Command', promptFn];
     }
 
     // Spawn the PTY

@@ -2,7 +2,7 @@
  * Slide-out settings panel for terminal customization
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSettingsStore } from '../../stores/settings-store';
 import { fontFamilyOptions } from '../../config/terminal-themes';
 import { ThemeSelector } from '../layout/ThemeSelector';
@@ -13,7 +13,16 @@ export interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
-  const { fontSize, fontFamily, setFontSize, setFontFamily } = useSettingsStore();
+  const { fontSize, fontFamily, defaultStartDir, setFontSize, setFontFamily, setDefaultStartDir } = useSettingsStore();
+
+  // Local controlled value for the directory input (allows typing before committing)
+  const [dirInputValue, setDirInputValue] = useState(defaultStartDir);
+  const [dirError, setDirError] = useState<string>('');
+
+  // Sync local input value when store value changes externally (e.g. via browse)
+  useEffect(() => {
+    setDirInputValue(defaultStartDir);
+  }, [defaultStartDir]);
 
   // Close on Escape
   useEffect(() => {
@@ -24,6 +33,56 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  const handleBrowse = async () => {
+    setDirError('');
+    try {
+      const res = await fetch('/api/v1/system/pick-directory', { method: 'POST' });
+      if (!res.ok) {
+        setDirError('Failed to open folder picker');
+        return;
+      }
+      const data = await res.json() as { path?: string | null; cancelled?: boolean; error?: string };
+      if (data.error) {
+        setDirError(data.error);
+        return;
+      }
+      if (data.path) {
+        setDefaultStartDir(data.path);
+        setDirInputValue(data.path);
+      }
+      // If cancelled (data.cancelled), do nothing — no error
+    } catch (err) {
+      console.warn('Failed to open folder picker:', err);
+      setDirError('Could not open folder picker dialog');
+    }
+  };
+
+  const handleDirCommit = async (value: string) => {
+    setDirError('');
+    if (!value.trim()) {
+      // Empty = OS default, valid
+      setDefaultStartDir('');
+      return;
+    }
+    try {
+      const res = await fetch('/api/v1/system/validate-directory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: value.trim() }),
+      });
+      const data = await res.json() as { valid: boolean; error?: string };
+      if (data.valid) {
+        setDefaultStartDir(value.trim());
+      } else {
+        setDirError(data.error ?? 'Invalid directory path');
+        setDefaultStartDir(''); // Fall back to OS default
+      }
+    } catch {
+      setDirError('Could not validate directory');
+      setDefaultStartDir(''); // Fall back to OS default
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -93,6 +152,40 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Default Start Directory */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Default Start Directory
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={dirInputValue}
+                onChange={(e) => setDirInputValue(e.target.value)}
+                onBlur={(e) => { void handleDirCommit(e.target.value); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    void handleDirCommit((e.target as HTMLInputElement).value);
+                  }
+                }}
+                placeholder="Leave blank to use system default"
+                className="flex-1 min-w-0 bg-input border border-border text-foreground rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground"
+              />
+              <button
+                type="button"
+                onClick={() => { void handleBrowse(); }}
+                className="shrink-0 px-3 py-2 bg-secondary text-foreground text-sm rounded border border-border hover:bg-secondary/80 transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                Browse
+              </button>
+            </div>
+            {dirError && (
+              <p className="text-sm mt-1" style={{ color: 'var(--destructive, #ef4444)' }}>
+                {dirError}
+              </p>
+            )}
           </div>
 
           {/* UI Theme */}
