@@ -16,7 +16,7 @@
 | Date | Action | Details |
 |------|--------|---------|
 | 2026-03-13 | Roadmap created | Single phase: Clear All Sessions + Export/Import |
-| 2026-03-13 | 01-01 completed | Clear All Sessions with bulk delete endpoint and confirmation dialog |
+| 2026-03-13 | 01-01 re-executed | Clear All Sessions: bulk delete endpoint + ClearAllDialog + SessionPanel wiring (394a2b0, a78cf68) |
 | 2026-03-13 | 01-02 completed | Session export with SerializeAddon scrollback capture and JSON download |
 
 ## Decisions
