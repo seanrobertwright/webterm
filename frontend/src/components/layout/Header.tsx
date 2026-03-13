@@ -89,16 +89,17 @@ export function Header({
     >
       {/* Left: Logo + Menu button */}
       <div className="flex items-center gap-1">
-        <img
-          src="/favicon.ico"
-          alt="WebTerm"
-          className="w-6 h-6"
-        />
+        <svg className="w-5 h-5 text-primary" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
         <button
           onClick={onMenuClick}
           className="
             p-2
-            text-muted-foreground hover:text-primary
+            text-primary hover:brightness-125
             rounded
             transition-colors
             focus:outline-none focus:ring-2 focus:ring-ring/50
@@ -171,7 +172,7 @@ export function Header({
             onClick={onSettingsClick}
             className="
               p-2
-              text-muted-foreground hover:text-primary
+              text-primary hover:brightness-125
               rounded
               transition-colors
               focus:outline-none focus:ring-2 focus:ring-ring/50

@@ -139,7 +139,7 @@ export function WindowTabs({
           className="
             flex items-center justify-center
             h-full w-8
-            text-muted-foreground hover:text-primary
+            text-primary hover:brightness-125
             transition-colors
             focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring/50
           "

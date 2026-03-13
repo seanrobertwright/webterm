@@ -258,16 +258,16 @@ function App() {
     [sendMessage, setActivePane]
   );
 
-  // Handle pane title change — update the containing window's name
+  // Handle pane title change — the backend handles window auto-rename via
+  // the windowRenamed WebSocket message (with smart name extraction), so we
+  // don't update the window name here to avoid overriding it with the raw
+  // terminal title (e.g. "C:\Program Files\PowerShell\7\pwsh.exe").
   const handlePaneTitleChange = useCallback(
-    (paneId: string, title: string) => {
-      // Find the window that contains this pane
-      const win = windows.find((w) => w.panes.some((p) => p.id === paneId));
-      if (win && win.name !== title) {
-        updateWindow(win.id, { name: title });
-      }
+    (_paneId: string, _title: string) => {
+      // Pane title is already updated by the paneTitleChanged message handler.
+      // Window name is updated by the windowRenamed message handler.
     },
-    [windows, updateWindow]
+    []
   );
 
   // Window tabs data

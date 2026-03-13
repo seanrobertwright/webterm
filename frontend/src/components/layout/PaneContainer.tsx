@@ -223,15 +223,12 @@ function LayoutNode({
     };
 
     const isActive = activePaneId === pane.id;
-    const style = getComputedStyle(document.documentElement);
-    const themePrimary = style.getPropertyValue('--pane-border-focus').trim() || '#22c55e';
-    const themeBorder = style.getPropertyValue('--pane-border').trim() || '#4b5563';
     const prefixBorderColor = '#eab308'; // yellow-500 for prefix mode
     const currentBorderColor = prefixActive
       ? prefixBorderColor
       : isActive
-        ? (activeBorderColor ?? themePrimary)
-        : (borderColor ?? themeBorder);
+        ? (activeBorderColor ?? 'var(--pane-border-focus)')
+        : (borderColor ?? 'var(--pane-border)');
 
     const borderLabel = paneBorderStatus !== 'off' && paneBorderStatus !== undefined
       ? (pane.title ?? pane.currentCommand ?? `pane ${pane.id.slice(0, 8)}`)

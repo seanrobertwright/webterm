@@ -115,8 +115,8 @@ function WindowTabItem({
         transition-colors duration-75
         ${
           isActive
-            ? 'bg-green-600 text-black font-bold'
-            : 'hover:bg-gray-700 text-green-400'
+            ? 'bg-primary text-primary-foreground font-bold'
+            : 'hover:bg-secondary text-primary'
         }
       `}
       title={`Window ${String(win.index)}: ${win.name}`}
@@ -198,7 +198,7 @@ export function StatusBar({
         fixed left-0 right-0 ${positionClasses} z-40
         flex items-center
         h-6 min-h-[1.5rem]
-        bg-black text-green-400
+        bg-card text-primary
         font-mono text-xs leading-6
         select-none overflow-hidden
       `}

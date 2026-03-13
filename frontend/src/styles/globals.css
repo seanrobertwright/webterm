@@ -46,33 +46,6 @@ html, body, #root {
   background-color: var(--pane-border-focus);
 }
 
-/* Connection status */
-.connection-status {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.connection-status.connected {
-  background-color: oklch(0.45 0.15 145 / 0.2);
-  color: oklch(0.7 0.2 145);
-}
-
-.connection-status.disconnected {
-  background-color: rgba(255, 0, 0, 0.2);
-  color: #ff4444;
-}
-
-.connection-status.connecting {
-  background-color: rgba(255, 255, 0, 0.2);
-  color: #ffff00;
-}
-
 /* Glitch effect for headers */
 .glitch-text {
   text-shadow:
