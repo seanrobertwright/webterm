@@ -51,7 +51,12 @@ Plans:
 
 **Goal:** Refactor settings panel and polish header UI — remove color theme from settings, add default start directory setting, improve connection status indicators, and replace the placeholder logo with the actual Webterm SVG logo (theme-colorable).
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Connection status dot colors and logo replacement
+- [ ] 02-02-PLAN.md — Settings panel restyle with theme variables and ThemeSelector move
+- [ ] 02-03-PLAN.md — Default start directory setting with native folder picker
 
 **Scope:**
 - Remove "Color Theme" section from settings panel (theme selector in header stays)
