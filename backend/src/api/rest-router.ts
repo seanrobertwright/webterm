@@ -13,6 +13,7 @@ import {
   handleCreateSession,
   handleUpdateSession,
   handleDeleteSession,
+  handleClearAllSessions,
   handleSaveSession,
 } from './routes/sessions.js';
 import { handleListKeybindings } from './routes/keybindings.js';
@@ -74,6 +75,7 @@ registerRoute('GET', '/api/v1/sessions', handleListSessions);
 registerRoute('GET', '/api/v1/sessions/:id', handleGetSession);
 registerRoute('POST', '/api/v1/sessions', handleCreateSession);
 registerRoute('PATCH', '/api/v1/sessions/:id', handleUpdateSession);
+registerRoute('DELETE', '/api/v1/sessions', handleClearAllSessions);
 registerRoute('DELETE', '/api/v1/sessions/:id', handleDeleteSession);
 registerRoute('POST', '/api/v1/sessions/:id/save', handleSaveSession);
 
@@ -215,9 +217,9 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     });
 
     try {
-      // Parse body for POST/PATCH requests
+      // Parse body for POST/PATCH/DELETE requests
       let body: unknown;
-      if (method === 'POST' || method === 'PATCH') {
+      if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
         body = await parseJsonBody(req);
       }
 

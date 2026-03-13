@@ -190,6 +190,35 @@ export async function handleUpdateSession(
 }
 
 /**
+ * DELETE /api/v1/sessions
+ * Clear all sessions except the active one
+ */
+export async function handleClearAllSessions(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  body: unknown
+): Promise<void> {
+  logger.debug('Clearing all sessions', { body });
+
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Request body is required', 'body', 'required');
+  }
+
+  const { keepSessionId } = body as { keepSessionId?: string };
+
+  if (!keepSessionId || typeof keepSessionId !== 'string') {
+    throw new ValidationError('keepSessionId is required', 'keepSessionId', 'required');
+  }
+
+  const deleted = sessionService.deleteAllSessions(keepSessionId);
+
+  logger.info('All sessions cleared', { keepSessionId, deleted });
+
+  sendJson(res, 200, { deleted });
+}
+
+/**
  * DELETE /api/v1/sessions/:id
  * Delete session
  */

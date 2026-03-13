@@ -331,6 +331,44 @@ export class SessionService {
   }
 
   /**
+   * Delete all sessions except the one with the given ID.
+   * Kills all PTYs for deleted sessions and cascade-deletes from SQLite.
+   * Returns the number of deleted sessions.
+   */
+  deleteAllSessions(excludeId: string): number {
+    const db = getDatabase();
+
+    // Get all sessions except the excluded one
+    const sessionRows = db.prepare(
+      'SELECT id FROM sessions WHERE id != ?'
+    ).all(excludeId) as Array<{ id: string }>;
+
+    if (sessionRows.length === 0) {
+      return 0;
+    }
+
+    // Kill PTYs for all panes in sessions being deleted
+    for (const row of sessionRows) {
+      const session = this.getSession(row.id);
+      if (session) {
+        for (const window of session.windows) {
+          for (const pane of window.panes) {
+            if (ptyManager.hasPty(pane.id)) {
+              ptyManager.kill(pane.id);
+            }
+          }
+        }
+      }
+    }
+
+    logger.info(`Deleting all sessions except: ${excludeId} (${sessionRows.length} to delete)`);
+
+    // Delete all sessions except the excluded one (CASCADE handles windows/panes)
+    const result = db.prepare('DELETE FROM sessions WHERE id != ?').run(excludeId);
+    return result.changes;
+  }
+
+  /**
    * Save current session state (layout) to database
    */
   saveSession(id: string): boolean {
