@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { ConnectionState } from '@webterm/shared/models';
 import { ConnectionStatus } from '../terminal/ConnectionStatus';
-import { ThemeSelector } from './ThemeSelector';
 
 export interface HeaderProps {
   /** Session name to display */
@@ -163,10 +162,9 @@ export function Header({
         </button>
       )}
 
-      {/* Right: Connection status + Theme selector + Settings */}
+      {/* Right: Connection status + Settings */}
       <div className="flex items-center gap-2">
         <ConnectionStatus state={connectionState} />
-        <ThemeSelector />
         {onSettingsClick && (
           <button
             onClick={onSettingsClick}
