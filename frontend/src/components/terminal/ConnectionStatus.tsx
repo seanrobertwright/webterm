@@ -13,7 +13,7 @@ const stateConfig: Record<
 > = {
   connected: {
     label: 'Connected',
-    dotClass: 'bg-primary',
+    dotClass: 'bg-green-500',
   },
   connecting: {
     label: 'Connecting',
@@ -25,7 +25,7 @@ const stateConfig: Record<
   },
   exited: {
     label: 'Exited',
-    dotClass: 'bg-muted-foreground',
+    dotClass: 'bg-destructive',
   },
 };
 
@@ -52,6 +52,7 @@ export function ConnectionStatus({ state, className = '' }: ConnectionStatusProp
         px-2 py-0.5
         text-[10px] font-semibold uppercase tracking-wider
         rounded border border-border bg-card text-primary
+        glow-border
         ${className}
       `}
       role="status"
