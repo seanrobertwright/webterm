@@ -26,6 +26,8 @@ export interface TerminalProps {
   onData?: (data: string) => void;
   /** Callback when terminal resizes */
   onResize?: (cols: number, rows: number) => void;
+  /** Callback when the terminal title changes (e.g. shell sets CWD via OSC sequence) */
+  onTitleChange?: (title: string) => void;
   /** Whether the terminal is focused */
   isFocused?: boolean;
   /** Custom font size */
@@ -69,6 +71,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     {
       onData,
       onResize,
+      onTitleChange,
       isFocused = false,
       fontSize = 14,
       fontFamily = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
@@ -83,6 +86,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const webglAddonRef = useRef<WebglAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onTitleChangeRef = useRef(onTitleChange);
 
     // Expose methods via ref
     useImperativeHandle(
@@ -166,6 +170,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           }
           return allowXterm;
         }
+        console.warn('[Terminal] webtermKeyHandler not set, key passed to xterm:', event.key);
         return true;
       });
 
@@ -214,6 +219,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         onData?.(data);
       });
 
+      // Set up title change handler via ref (avoids re-creating terminal when callback changes)
+      const titleDisposable = terminal.onTitleChange((title) => {
+        onTitleChangeRef.current?.(title);
+      });
+
       // Cleanup on unmount
       return () => {
         if (resizeTimeoutRef.current) {
@@ -221,6 +231,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         }
         resizeObserverRef.current?.disconnect();
         dataDisposable.dispose();
+        titleDisposable.dispose();
         webglAddonRef.current?.dispose();
         terminal.dispose();
         terminalRef.current = null;
@@ -228,6 +239,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [onData, onResize, debouncedFit]);
+
+    // Keep onTitleChange ref in sync without re-initializing the terminal
+    onTitleChangeRef.current = onTitleChange;
 
     // Reactively update terminal settings without recreating the instance
     useEffect(() => {

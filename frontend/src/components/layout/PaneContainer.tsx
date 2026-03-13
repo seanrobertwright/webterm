@@ -64,8 +64,8 @@ interface ContextMenuState {
 export interface PaneContainerProps {
   /** Layout tree structure */
   layout: Layout;
-  /** Map of pane IDs to pane data */
-  panes: Map<string, Pane>;
+  /** Map or array of pane data */
+  panes: Map<string, Pane> | Pane[];
   /** Currently focused pane ID */
   activePaneId?: string | null;
   /** Zoomed pane ID (renders only this pane at 100%) */
@@ -80,6 +80,8 @@ export interface PaneContainerProps {
   onPaneFocus?: (paneId: string) => void;
   /** Callback to restart a pane */
   onPaneRestart?: (paneId: string) => void;
+  /** Callback when a pane's terminal title changes */
+  onPaneTitleChange?: (paneId: string, title: string) => void;
   /** Callback when layout sizes change due to splitter drag */
   onLayoutResize?: (path: number[], sizes: number[]) => void;
   /** Callback when a context menu command is selected */
@@ -90,6 +92,8 @@ export interface PaneContainerProps {
   paneActiveBorderStyle?: string;
   /** Pane border status position: "top", "bottom", or "off" */
   paneBorderStatus?: 'top' | 'bottom' | 'off';
+  /** Whether prefix mode (Ctrl+b) is active */
+  prefixActive?: boolean;
   /** Additional CSS classes */
   className?: string;
 }
@@ -103,6 +107,7 @@ interface LayoutNodeProps {
   onPaneResize?: (paneId: string, cols: number, rows: number) => void;
   onPaneFocus?: (paneId: string) => void;
   onPaneRestart?: (paneId: string) => void;
+  onPaneTitleChange?: (paneId: string, title: string) => void;
   onLayoutResize?: (path: number[], sizes: number[]) => void;
   onPaneContextMenu?: (paneId: string, x: number, y: number) => void;
   /** CSS color for inactive pane borders */
@@ -111,6 +116,8 @@ interface LayoutNodeProps {
   activeBorderColor?: string | undefined;
   /** Pane border status position */
   paneBorderStatus?: 'top' | 'bottom' | 'off' | undefined;
+  /** Whether prefix mode is active (changes border color) */
+  prefixActive?: boolean | undefined;
   className?: string;
   /** Path to this node in the layout tree */
   path: number[];
@@ -126,11 +133,13 @@ function LayoutNode({
   onPaneResize,
   onPaneFocus,
   onPaneRestart,
+  onPaneTitleChange,
   onLayoutResize,
   onPaneContextMenu,
   borderColor,
   activeBorderColor,
   paneBorderStatus,
+  prefixActive,
   path,
   className = '',
 }: LayoutNodeProps) {
@@ -178,6 +187,7 @@ function LayoutNode({
       onResize?: (paneId: string, cols: number, rows: number) => void;
       onFocus?: (paneId: string) => void;
       onRestart?: (paneId: string) => void;
+      onTitleChange?: (paneId: string, title: string) => void;
       className: string;
     } = {
       paneId: pane.id,
@@ -200,6 +210,9 @@ function LayoutNode({
     if (onPaneRestart !== undefined) {
       terminalProps.onRestart = onPaneRestart;
     }
+    if (onPaneTitleChange !== undefined) {
+      terminalProps.onTitleChange = onPaneTitleChange;
+    }
     if (broadcastPaneIds?.has(pane.id)) {
       terminalProps.broadcastMode = true;
     }
@@ -210,9 +223,12 @@ function LayoutNode({
     };
 
     const isActive = activePaneId === pane.id;
-    const currentBorderColor = isActive
-      ? (activeBorderColor ?? '#22c55e')  // green-500 default
-      : (borderColor ?? '#4b5563');        // gray-600 default
+    const prefixBorderColor = '#eab308'; // yellow-500 for prefix mode
+    const currentBorderColor = prefixActive
+      ? prefixBorderColor
+      : isActive
+        ? (activeBorderColor ?? '#22c55e')  // green-500 default
+        : (borderColor ?? '#4b5563');        // gray-600 default
 
     const borderLabel = paneBorderStatus !== 'off' && paneBorderStatus !== undefined
       ? (pane.title ?? pane.currentCommand ?? `pane ${pane.id.slice(0, 8)}`)
@@ -221,14 +237,16 @@ function LayoutNode({
     return (
       <div
         className="w-full h-full relative"
-        style={{ border: `2px solid ${currentBorderColor}` }}
+        style={{ border: `2px solid ${currentBorderColor}`, transition: 'border-color 150ms ease' }}
         onContextMenu={handleContextMenu}
       >
         {/* Pane border label */}
         {borderLabel && (
           <div
             className={`absolute left-2 z-10 max-w-[50%] truncate rounded px-1.5 py-0.5 text-xs font-mono ${
-              isActive ? 'bg-green-900/80 text-green-300' : 'bg-gray-800/80 text-gray-400'
+              prefixActive
+                ? 'bg-yellow-900/80 text-yellow-300'
+                : isActive ? 'bg-green-900/80 text-green-300' : 'bg-gray-800/80 text-gray-400'
             }`}
             style={paneBorderStatus === 'bottom' ? { bottom: -1 } : { top: -1 }}
           >
@@ -285,6 +303,9 @@ function LayoutNode({
           if (onPaneRestart !== undefined) {
             layoutNodeProps.onPaneRestart = onPaneRestart;
           }
+          if (onPaneTitleChange !== undefined) {
+            layoutNodeProps.onPaneTitleChange = onPaneTitleChange;
+          }
           if (onLayoutResize !== undefined) {
             layoutNodeProps.onLayoutResize = onLayoutResize;
           }
@@ -299,6 +320,9 @@ function LayoutNode({
           }
           if (paneBorderStatus !== undefined) {
             layoutNodeProps.paneBorderStatus = paneBorderStatus;
+          }
+          if (prefixActive !== undefined) {
+            layoutNodeProps.prefixActive = prefixActive;
           }
 
           return (
@@ -346,6 +370,7 @@ export function PaneContainer(props: PaneContainerProps) {
     onContextMenuCommand,
     paneBorderStyle,
     paneActiveBorderStyle,
+    prefixActive,
     paneBorderStatus = 'off',
     className = '',
     ...rest
@@ -402,10 +427,12 @@ export function PaneContainer(props: PaneContainerProps) {
     if (rest.onPaneResize) zoomedProps.onPaneResize = rest.onPaneResize;
     if (rest.onPaneFocus) zoomedProps.onPaneFocus = rest.onPaneFocus;
     if (rest.onPaneRestart) zoomedProps.onPaneRestart = rest.onPaneRestart;
+    if (rest.onPaneTitleChange) zoomedProps.onPaneTitleChange = rest.onPaneTitleChange;
     zoomedProps.onPaneContextMenu = handlePaneContextMenu;
     if (borderColor !== undefined) zoomedProps.borderColor = borderColor;
     if (activeBorderColor !== undefined) zoomedProps.activeBorderColor = activeBorderColor;
     zoomedProps.paneBorderStatus = paneBorderStatus;
+    if (prefixActive !== undefined) zoomedProps.prefixActive = prefixActive;
     return (
       <div className={`w-full h-full overflow-hidden ${className}`}>
         <LayoutNode {...zoomedProps} />
@@ -433,6 +460,7 @@ export function PaneContainer(props: PaneContainerProps) {
         borderColor={borderColor}
         activeBorderColor={activeBorderColor}
         paneBorderStatus={paneBorderStatus}
+        prefixActive={prefixActive}
         {...rest}
       />
       {contextMenu && (

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import type { ConnectionState } from '@webterm/shared/models';
 import { ConnectionStatus } from '../terminal/ConnectionStatus';
+import { ThemeSelector } from './ThemeSelector';
 
 export interface HeaderProps {
   /** Session name to display */
@@ -97,10 +98,10 @@ export function Header({
           onClick={onMenuClick}
           className="
             p-2
-            text-gray-400 hover:text-green-400
+            text-gray-400 hover:text-primary
             rounded
             transition-colors
-            focus:outline-none focus:ring-2 focus:ring-green-500/50
+            focus:outline-none focus:ring-2 focus:ring-ring/50
           "
           type="button"
           aria-label="Open menu"
@@ -133,10 +134,10 @@ export function Header({
           onBlur={handleSave}
           maxLength={50}
           className="
-            text-lg font-bold text-green-400
-            bg-gray-800 border border-green-500
+            text-lg font-bold text-primary
+            bg-gray-800 border border-primary
             rounded px-2 py-0.5
-            focus:outline-none focus:ring-2 focus:ring-green-500
+            focus:outline-none focus:ring-2 focus:ring-ring
             text-center
             w-64 max-w-[50vw]
           "
@@ -148,11 +149,11 @@ export function Header({
           className="
             glitch-text
             text-lg font-bold
-            text-green-400
-            hover:text-green-300
+            text-primary
+            hover:brightness-125
             cursor-pointer
             transition-colors
-            focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:rounded
+            focus:outline-none focus:ring-2 focus:ring-ring/50 focus:rounded
           "
           type="button"
           aria-label={`Session: ${sessionName}. Click to edit.`}

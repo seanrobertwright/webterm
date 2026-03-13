@@ -15,6 +15,13 @@ defaultRegistry
     flags: [
       { short: 's', takesValue: true, description: 'Session name' },
       { short: 'n', takesValue: true, description: 'Initial window name' },
+      { short: 'd', takesValue: false, description: 'Detached' },
+      { short: 'P', takesValue: false, description: 'Print info' },
+      { short: 'F', takesValue: true, description: 'Format string' },
+      { short: 'c', takesValue: true, description: 'Working directory' },
+      { short: 'A', takesValue: false, description: 'Attach or create' },
+      { short: 'x', takesValue: true, description: 'Width' },
+      { short: 'y', takesValue: true, description: 'Height' },
     ],
     args: [],
   })
@@ -56,6 +63,34 @@ defaultRegistry
     description: 'List connected clients',
     flags: [],
     args: [],
+  })
+  .register({
+    name: 'has-session',
+    aliases: ['has'],
+    description: 'Check if a session exists',
+    flags: [
+      { short: 't', takesValue: true, description: 'Target session' },
+    ],
+    args: [],
+  })
+  .register({
+    name: 'kill-session',
+    aliases: [],
+    description: 'Kill a session',
+    flags: [
+      { short: 't', takesValue: true, description: 'Target session' },
+    ],
+    args: [],
+  })
+  .register({
+    name: 'send-keys',
+    aliases: ['send'],
+    description: 'Send keys to a pane',
+    flags: [
+      { short: 't', takesValue: true, description: 'Target pane' },
+      { short: 'l', takesValue: false, description: 'Literal keys' },
+    ],
+    args: [],
   });
 
 // ============================================================================
@@ -70,6 +105,10 @@ defaultRegistry
     flags: [
       { short: 'n', takesValue: true, description: 'Window name' },
       { short: 't', takesValue: true, description: 'Target window' },
+      { short: 'P', takesValue: false, description: 'Print pane info' },
+      { short: 'F', takesValue: true, description: 'Format string' },
+      { short: 'c', takesValue: true, description: 'Working directory' },
+      { short: 'd', takesValue: false, description: 'Do not make active' },
     ],
     args: [],
   })
@@ -165,6 +204,10 @@ defaultRegistry
       { short: 'v', takesValue: false, description: 'Vertical split' },
       { short: 't', takesValue: true, description: 'Target pane' },
       { short: 'l', takesValue: true, description: 'Size' },
+      { short: 'P', takesValue: false, description: 'Print pane info' },
+      { short: 'F', takesValue: true, description: 'Format string' },
+      { short: 'c', takesValue: true, description: 'Working directory' },
+      { short: 'd', takesValue: false, description: 'Do not make active' },
     ],
     args: [],
   })
@@ -470,6 +513,7 @@ defaultRegistry
     description: 'Show a status message',
     flags: [
       { short: 't', takesValue: true, description: 'Target pane' },
+      { short: 'p', takesValue: false, description: 'Print to stdout' },
     ],
     args: [{ name: 'message', required: false }],
   })

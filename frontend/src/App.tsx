@@ -37,7 +37,7 @@ declare global {
 
 function App() {
   const { layout, activePane, panes, zoomedPane, setActivePane, toggleZoom } = usePaneStore();
-  const { currentSession, windows, activeWindowId, setActiveWindow, setSavedSessions, updateSession } = useSessionStore();
+  const { currentSession, windows, activeWindowId, setActiveWindow, setSavedSessions, updateSession, updateWindow } = useSessionStore();
   const sortedWindows = useSessionStore(
     useShallow((state) => [...state.windows].sort((a, b) => a.index - b.index))
   );
@@ -83,6 +83,28 @@ function App() {
 
   // Set up message handlers for WebSocket events
   useMessageHandlers();
+
+  // Sync pane-store metadata when active window changes (for keybindings/navigation)
+  // Note: we do NOT use setInitialState here — that would re-create the panes map
+  // and cause React to unmount terminals. We only sync layout/windowId/activePane.
+  const { setLayout: setPaneLayout, setWindowId: setPaneWindowId, windowId: paneWindowId } = usePaneStore();
+  useEffect(() => {
+    if (!activeWindowId || activeWindowId === paneWindowId) return;
+    const activeWindow = windows.find((w) => w.id === activeWindowId);
+    if (activeWindow) {
+      setPaneWindowId(activeWindowId);
+      setPaneLayout(activeWindow.layout);
+      // Set active pane to first pane of the window if current activePane isn't in this window
+      const currentActive = usePaneStore.getState().activePane;
+      const paneIds = activeWindow.panes.map(p => p.id);
+      if (!currentActive || !paneIds.includes(currentActive)) {
+        const firstPane = paneIds[0] ?? null;
+        if (firstPane) {
+          setActivePane(firstPane);
+        }
+      }
+    }
+  }, [activeWindowId, paneWindowId, windows, setPaneWindowId, setPaneLayout, setActivePane]);
 
   // T006: Load saved sessions on app start
   useEffect(() => {
@@ -199,16 +221,13 @@ function App() {
     }),
     [handleKeybindingAction, handleKeybindingCommand]
   );
-  const { handleKeyEvent } = useGlobalKeyBindings(keybindingOptions);
+  const { handleKeyEvent, prefixMode } = useGlobalKeyBindings(keybindingOptions);
 
   // Expose the keybinding handler globally so Terminal instances can call it
   // from attachCustomKeyEventHandler without prop-drilling through 4 layers.
-  useEffect(() => {
-    globalThis.webtermKeyHandler = handleKeyEvent;
-    return () => {
-      globalThis.webtermKeyHandler = null;
-    };
-  }, [handleKeyEvent]);
+  // Use synchronous assignment (not useEffect) to avoid gaps where the handler
+  // is null between effect cleanup and re-run.
+  globalThis.webtermKeyHandler = handleKeyEvent;
 
   // Map WebSocket state to ConnectionState
   const connectionState: ConnectionState =
@@ -237,6 +256,18 @@ function App() {
       sendMessage({ type: 'focus', payload: { paneId } });
     },
     [sendMessage, setActivePane]
+  );
+
+  // Handle pane title change — update the containing window's name
+  const handlePaneTitleChange = useCallback(
+    (paneId: string, title: string) => {
+      // Find the window that contains this pane
+      const win = windows.find((w) => w.panes.some((p) => p.id === paneId));
+      if (win && win.name !== title) {
+        updateWindow(win.id, { name: title });
+      }
+    },
+    [windows, updateWindow]
   );
 
   // Window tabs data
@@ -368,8 +399,8 @@ function App() {
     [sendMessage, toggleZoom, copySelection, pasteToPane, sendInput],
   );
 
-  // Don't render layout until it's loaded
-  if (!layout) {
+  // Don't render layout until we have at least one window
+  if (windows.length === 0) {
     return (
       <ErrorBoundary>
         <div className="h-screen w-screen flex items-center justify-center bg-background">
@@ -396,17 +427,34 @@ function App() {
           {...(windows.length > 1 ? { onTabClose: handleWindowClose } : {})}
           onNewWindow={handleNewWindow}
         />
-        <main className="flex-1 relative overflow-hidden p-2 pb-8">
-          <PaneContainer
-            layout={layout}
-            panes={panes}
-            activePaneId={activePane}
-            zoomedPaneId={zoomedPane}
-            onPaneData={handlePaneData}
-            onPaneResize={handlePaneResize}
-            onPaneFocus={handlePaneFocus}
-            onContextMenuCommand={handleContextMenuCommand}
-          />
+        <main className="flex-1 relative overflow-hidden">
+          {windows.map((w) => {
+            const isActive = activeWindowId === w.id;
+            return (
+            <div
+              key={w.id}
+              className="absolute p-2 pb-8"
+              style={{
+                inset: 0,
+                visibility: isActive ? 'visible' : 'hidden',
+                zIndex: isActive ? 1 : 0,
+              }}
+            >
+              <PaneContainer
+                layout={w.layout}
+                panes={w.panes}
+                activePaneId={isActive ? activePane : null}
+                zoomedPaneId={isActive ? zoomedPane : null}
+                onPaneData={handlePaneData}
+                onPaneResize={handlePaneResize}
+                onPaneFocus={handlePaneFocus}
+                onPaneTitleChange={handlePaneTitleChange}
+                onContextMenuCommand={handleContextMenuCommand}
+                prefixActive={prefixMode.active}
+              />
+            </div>
+            );
+          })}
           {connectionState === 'disconnected' && (
             <DisconnectionOverlay isVisible={true} />
           )}

@@ -39,6 +39,8 @@ export interface TerminalPaneProps {
   onFocus?: (paneId: string) => void;
   /** Callback to restart the terminal */
   onRestart?: (paneId: string) => void;
+  /** Callback when terminal title changes (e.g. CWD update) */
+  onTitleChange?: (paneId: string, title: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -55,6 +57,7 @@ export function TerminalPane({
   onResize,
   onFocus,
   onRestart,
+  onTitleChange,
   className = '',
 }: TerminalPaneProps) {
   const terminalRef = useRef<TerminalHandle>(null);
@@ -107,6 +110,13 @@ export function TerminalPane({
     onRestart?.(paneId);
   }, [paneId, onRestart]);
 
+  const handleTitleChange = useCallback(
+    (title: string) => {
+      onTitleChange?.(paneId, title);
+    },
+    [paneId, onTitleChange]
+  );
+
   const hasExited = connectionState === 'exited';
   const isDisconnected = connectionState === 'disconnected';
 
@@ -129,6 +139,7 @@ export function TerminalPane({
           ref={terminalRef}
           onData={handleData}
           onResize={handleResize}
+          onTitleChange={handleTitleChange}
           isFocused={isFocused}
           fontSize={fontSize}
           fontFamily={fontFamily}
@@ -136,8 +147,10 @@ export function TerminalPane({
         />
       </div>
 
-      {/* Connection status indicator */}
-      <ConnectionStatus state={connectionState} />
+      {/* Connection status indicator — only show when not connected (header shows it globally) */}
+      {connectionState !== 'connected' && (
+        <ConnectionStatus state={connectionState} />
+      )}
 
       {/* Broadcast mode indicator */}
       {broadcastMode && (

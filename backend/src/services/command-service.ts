@@ -25,12 +25,14 @@ import {
   insertPaneIntoLayout,
   PRESET_LAYOUT_ORDER,
   rotatePaneIds,
+  splitLayout,
   swapPanesInLayout,
+  validatePaneLimit,
 } from './layout-service.js';
 import { defaultRegistry } from '../../../shared/tmux/command-defs.js';
 import type { ParsedCommand } from '../../../shared/tmux/command-registry.js';
-import type { OptionScope, PresetLayoutName, SplitDirection } from '../../../shared/types/models.js';
-import { getConnectedSessions, getSessionClients } from '../api/websocket-server.js';
+import type { OptionScope, Pane, PresetLayoutName, ShellType, SplitDirection } from '../../../shared/types/models.js';
+import { broadcastToSession, getConnectedSessions, getSessionClients } from '../api/websocket-server.js';
 
 /**
  * Module-level map tracking which preset layout index each window is currently at.
@@ -70,7 +72,7 @@ export class CommandService {
         // Session commands
         // ================================================================
         case 'new-session':
-          return this.stubSuccess();
+          return this.handleNewSession(parsed, ctx);
         case 'rename-session':
           return this.stubSuccess();
         case 'detach-client':
@@ -81,12 +83,18 @@ export class CommandService {
           return this.handleListSessions();
         case 'list-clients':
           return this.handleListClients();
+        case 'has-session':
+          return this.handleHasSession(parsed);
+        case 'kill-session':
+          return this.handleKillSession(parsed);
+        case 'send-keys':
+          return this.handleSendKeys(parsed, ctx);
 
         // ================================================================
         // Window commands
         // ================================================================
         case 'new-window':
-          return this.stubSuccess();
+          return this.handleNewWindow(parsed, ctx);
         case 'kill-window':
           return this.stubSuccess();
         case 'rename-window':
@@ -110,9 +118,9 @@ export class CommandService {
         // Pane commands
         // ================================================================
         case 'split-window':
-          return this.stubSuccess();
+          return this.handleSplitWindow(parsed, ctx);
         case 'kill-pane':
-          return this.stubSuccess();
+          return this.handleKillPane(parsed, ctx);
         case 'select-pane':
           return this.handleSelectPane(parsed, ctx);
         case 'swap-pane':
@@ -122,7 +130,7 @@ export class CommandService {
         case 'join-pane':
           return this.handleJoinPane(parsed, ctx);
         case 'resize-pane':
-          return this.stubSuccess();
+          return this.handleResizePane(parsed, ctx);
         case 'rotate-window':
           return this.handleRotateWindow(parsed, ctx);
         case 'display-panes':
@@ -186,7 +194,7 @@ export class CommandService {
         // Display commands
         // ================================================================
         case 'display-message':
-          return this.handleDisplayMessage(parsed);
+          return this.handleDisplayMessage(parsed, ctx);
         case 'display-popup':
           return this.handleDisplayPopup(parsed);
         case 'clock-mode':
@@ -878,7 +886,7 @@ export class CommandService {
     const sourceFlag = parsed.flags.get('s');
     const targetFlag = parsed.flags.get('t');
 
-    const sourcePaneId = typeof sourceFlag === 'string' ? sourceFlag : ctx.paneId;
+    const sourcePaneId = this.resolvePaneTarget(sourceFlag, ctx.paneId);
 
     const window = sessionService.getWindow(ctx.windowId);
     if (!window) {
@@ -888,7 +896,7 @@ export class CommandService {
     let targetPaneId: string | undefined;
 
     if (typeof targetFlag === 'string') {
-      targetPaneId = targetFlag;
+      targetPaneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
     } else if (swapDown || swapUp) {
       // Find next/previous pane in tree order
       const paneIds = getPaneIds(window.layout);
@@ -934,7 +942,7 @@ export class CommandService {
   private handleBreakPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
     const targetFlag = parsed.flags.get('t');
     const nameFlag = parsed.flags.get('n');
-    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const paneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
     const windowName = typeof nameFlag === 'string' ? nameFlag : 'Window';
 
     const window = sessionService.getWindow(ctx.windowId);
@@ -997,13 +1005,13 @@ export class CommandService {
     const targetFlag = parsed.flags.get('t');
     const isHorizontal = parsed.flags.get('h') === true;
 
-    const sourcePaneId = typeof sourceFlag === 'string' ? sourceFlag : ctx.paneId;
+    const sourcePaneId = this.resolvePaneTarget(sourceFlag, ctx.paneId);
 
     if (typeof targetFlag !== 'string') {
       return { output: 'Target pane (-t) is required for join-pane', success: false };
     }
 
-    const targetPaneId = targetFlag;
+    const targetPaneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
 
     if (sourcePaneId === targetPaneId) {
       return { output: 'Source and target pane are the same', success: false };
@@ -1102,7 +1110,7 @@ export class CommandService {
     const unmarkPane = parsed.flags.get('M') === true;
 
     // Handle mark/unmark on the current pane (or target)
-    const targetPaneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const targetPaneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
 
     if (markPane) {
       sessionService.updatePaneMarked(targetPaneId, true);
@@ -1117,11 +1125,11 @@ export class CommandService {
     // If a direct target was provided, select it
     if (typeof targetFlag === 'string') {
       // Verify pane exists
-      const pane = sessionService.getPane(targetFlag);
+      const pane = sessionService.getPane(targetPaneId);
       if (!pane) {
-        return { output: `Pane not found: ${targetFlag}`, success: false };
+        return { output: `Pane not found: ${targetPaneId}`, success: false };
       }
-      return { output: targetFlag, success: true };
+      return { output: targetPaneId, success: true };
     }
 
     // Direction-based selection
@@ -1156,7 +1164,7 @@ export class CommandService {
     const targetFlag = parsed.flags.get('t');
     const killExisting = parsed.flags.get('k') === true;
 
-    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const paneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
 
     const pane = sessionService.getPane(paneId);
     if (!pane) {
@@ -1205,7 +1213,7 @@ export class CommandService {
   private handleCapturePane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
     const targetFlag = parsed.flags.get('t');
     const bufferFlag = parsed.flags.get('b');
-    const paneId = typeof targetFlag === 'string' ? targetFlag : ctx.paneId;
+    const paneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
     const bufferName = typeof bufferFlag === 'string' ? bufferFlag : undefined;
 
     // Signal the WebSocket handler to request capture from the client
@@ -1380,12 +1388,40 @@ export class CommandService {
   // ==========================================================================
 
   /**
-   * display-message: Show a message to the user.
+   * display-message: Show a message or print formatted output.
    *
-   * Positional: message text
+   * Flags: -p (print to stdout), -t (target pane)
+   * Positional: message/format text
+   *
+   * When -p is given, format strings like #{pane_id}, #{session_name},
+   * #{window_index}, #{window_name} are replaced with actual values.
    */
-  private handleDisplayMessage(parsed: ParsedCommand): CommandResult {
+  private handleDisplayMessage(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
     const message = parsed.positional[0] ?? '';
+    const printFlag = parsed.flags.get('p') === true;
+    const targetFlag = parsed.flags.get('t');
+
+    // Resolve target pane for context
+    const paneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
+
+    // If target pane resolves to a different window, update context
+    let effectiveCtx = ctx;
+    if (paneId !== ctx.paneId) {
+      const pane = sessionService.getPane(paneId);
+      if (pane) {
+        const win = sessionService.getWindow(pane.windowId);
+        if (win) {
+          effectiveCtx = { ...ctx, paneId, windowId: win.id };
+        }
+      }
+    }
+
+    if (printFlag) {
+      // Replace format strings
+      const formatted = this.formatTmuxString(message, paneId, effectiveCtx);
+      return { output: formatted, success: true };
+    }
+
     return { output: message, success: true };
   }
 
@@ -1444,6 +1480,64 @@ export class CommandService {
   // ==========================================================================
 
   /**
+   * Resolve a pane target that may be a tmux-style %N ID, a UUID, or undefined.
+   * Returns the pane UUID, or the fallback if target is not provided.
+   */
+  private resolvePaneTarget(target: string | boolean | undefined, fallback: string): string {
+    if (typeof target !== 'string') return fallback;
+    // Try tmux-style %N format
+    if (target.startsWith('%')) {
+      const resolved = ptyManager.resolveTmuxPaneId(target);
+      if (resolved) return resolved;
+    }
+    return target;
+  }
+
+  /**
+   * Format a tmux-style format string by replacing variables.
+   * Supported: #{pane_id}, #{session_name}, #{window_index}, #{window_name}, #{window_id}, #{session_id}
+   */
+  private formatTmuxString(format: string, paneId: string, ctx: CommandContext): string {
+    let result = format;
+
+    // #{pane_id} -> %N
+    if (result.includes('#{pane_id}')) {
+      const tmuxId = ptyManager.getPaneTmuxId(paneId) ?? paneId;
+      result = result.replace(/#{pane_id}/g, tmuxId);
+    }
+
+    // #{session_name}
+    if (result.includes('#{session_name}')) {
+      const session = sessionService.getSession(ctx.sessionId);
+      result = result.replace(/#{session_name}/g, session?.name ?? '');
+    }
+
+    // #{session_id}
+    if (result.includes('#{session_id}')) {
+      result = result.replace(/#{session_id}/g, ctx.sessionId);
+    }
+
+    // #{window_index}
+    if (result.includes('#{window_index}')) {
+      const window = sessionService.getWindow(ctx.windowId);
+      result = result.replace(/#{window_index}/g, String(window?.index ?? 0));
+    }
+
+    // #{window_name}
+    if (result.includes('#{window_name}')) {
+      const window = sessionService.getWindow(ctx.windowId);
+      result = result.replace(/#{window_name}/g, window?.name ?? '');
+    }
+
+    // #{window_id}
+    if (result.includes('#{window_id}')) {
+      result = result.replace(/#{window_id}/g, ctx.windowId);
+    }
+
+    return result;
+  }
+
+  /**
    * Resolve option scope flags into an OptionScope and optional scopeId.
    *
    * Priority when multiple flags are set:
@@ -1471,6 +1565,512 @@ export class CommandService {
     }
     // Default: session scope
     return { scope: 'session', scopeId: ctx.sessionId };
+  }
+
+  // ==========================================================================
+  // Split & Window creation handlers
+  // ==========================================================================
+
+  /**
+   * split-window: Split the target pane horizontally or vertically.
+   *
+   * Flags: -h (horizontal), -v (vertical, default), -t (target pane), -l (size)
+   *
+   * Spawns a new PTY, updates the layout tree, persists to DB, and broadcasts
+   * a `paneCreated` message so all connected clients update their view.
+   */
+  private handleSplitWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const isHorizontal = parsed.flags.get('h') === true;
+    // Default to vertical split (like tmux) unless -h is specified
+    const direction: SplitDirection = isHorizontal ? 'h' : 'v';
+
+    const targetPaneId = this.resolvePaneTarget(parsed.flags.get('t'), ctx.paneId);
+
+    if (!targetPaneId) {
+      return { output: 'No target pane specified', success: false };
+    }
+
+    // Resolve window from target pane if it's not in the current window
+    let windowId = ctx.windowId;
+    const targetPane = sessionService.getPane(targetPaneId);
+    if (targetPane) {
+      windowId = targetPane.windowId;
+    }
+
+    // Get the window to validate and check limits
+    const window = sessionService.getWindow(windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    if (!validatePaneLimit(window.layout)) {
+      return { output: 'Maximum pane limit reached', success: false };
+    }
+
+    // Generate new pane ID
+    const newPaneId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Determine working directory
+    const cwdFlag = parsed.flags.get('c');
+    const cwd = typeof cwdFlag === 'string' ? cwdFlag : undefined;
+
+    // Spawn a new PTY for the new pane
+    const ptyInstance = ptyManager.spawn(newPaneId, {
+      shell: 'default',
+      cols: 80,
+      rows: 24,
+      sessionId: ctx.sessionId,
+      ...(cwd ? { cwd } : {}),
+    });
+
+    // Update the layout tree
+    const newLayout = splitLayout(window.layout, targetPaneId, direction, newPaneId);
+    if (!newLayout) {
+      // Target pane not found — kill the PTY we just spawned
+      ptyManager.kill(newPaneId);
+      return { output: `Pane ${targetPaneId} not found in layout`, success: false };
+    }
+
+    // Persist layout to DB
+    sessionService.updateWindowLayout(windowId, newLayout);
+
+    // Build the Pane object for broadcast
+    const newPane: Pane = {
+      id: newPaneId,
+      windowId,
+      shell: 'default' as ShellType,
+      cwd: ptyInstance.cwd,
+      cols: ptyInstance.cols,
+      rows: ptyInstance.rows,
+      connectionState: 'connected',
+      exitCode: null,
+      createdAt: Date.now(),
+      title: '',
+      marked: false,
+      currentCommand: null,
+    };
+
+    // Broadcast paneCreated to all WebSocket clients in this session
+    broadcastToSession(ctx.sessionId, {
+      type: 'paneCreated',
+      payload: { pane: newPane, layout: newLayout },
+    });
+
+    logger.info('split-window: pane split', {
+      targetPaneId,
+      newPaneId,
+      direction,
+      windowId,
+    });
+
+    // Handle -P -F format output
+    const printFlag = parsed.flags.get('P') === true;
+    const formatFlag = parsed.flags.get('F');
+
+    if (printFlag && typeof formatFlag === 'string') {
+      const formatted = this.formatTmuxString(formatFlag, newPaneId, { ...ctx, windowId });
+      return { output: formatted, success: true };
+    }
+
+    if (printFlag) {
+      // Default -P output: tmux pane id
+      const tmuxId = ptyManager.getPaneTmuxId(newPaneId) ?? newPaneId;
+      return { output: tmuxId, success: true };
+    }
+
+    // Return the new pane ID so callers (like Claude Code) can reference it
+    return { output: newPaneId, success: true };
+  }
+
+  /**
+   * new-window: Create a new window in the current session.
+   *
+   * Flags: -n (window name), -t (target window)
+   *
+   * Creates a new window with an initial pane, spawns a PTY, and broadcasts
+   * a `windowCreated` message to all connected clients.
+   */
+  private handleNewWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const nameFlag = parsed.flags.get('n');
+    const windowName = typeof nameFlag === 'string' ? nameFlag : `Window ${Date.now()}`;
+    const cwdFlag = parsed.flags.get('c');
+    const cwd = typeof cwdFlag === 'string' ? cwdFlag : undefined;
+
+    // Create window via session service (persists to DB, creates initial pane)
+    const window = sessionService.createWindow(ctx.sessionId, windowName, 'default', cwd);
+    if (!window) {
+      return { output: `Failed to create window in session ${ctx.sessionId}`, success: false };
+    }
+
+    // Spawn PTY for the initial pane
+    const initialPane = window.panes[0];
+    if (initialPane) {
+      ptyManager.spawn(initialPane.id, {
+        shell: 'default',
+        cols: initialPane.cols,
+        rows: initialPane.rows,
+        sessionId: ctx.sessionId,
+        ...(cwd ? { cwd } : {}),
+      });
+      initialPane.connectionState = 'connected';
+    }
+
+    // Broadcast windowCreated to all WebSocket clients in this session
+    broadcastToSession(ctx.sessionId, {
+      type: 'windowCreated',
+      payload: { window },
+    });
+
+    logger.info('new-window: window created', {
+      windowId: window.id,
+      sessionId: ctx.sessionId,
+      name: windowName,
+    });
+
+    // Handle -P -F format output
+    const printFlag = parsed.flags.get('P') === true;
+    const formatFlag = parsed.flags.get('F');
+    const paneId = initialPane?.id ?? '';
+
+    if (printFlag && typeof formatFlag === 'string') {
+      const formatted = this.formatTmuxString(formatFlag, paneId, { ...ctx, windowId: window.id });
+      return { output: formatted, success: true };
+    }
+
+    if (printFlag) {
+      const tmuxId = ptyManager.getPaneTmuxId(paneId) ?? paneId;
+      return { output: tmuxId, success: true };
+    }
+
+    // Return the window ID (and initial pane ID) for callers
+    return { output: `${window.id}:${paneId}`, success: true };
+  }
+
+  // ==========================================================================
+  // New command handlers
+  // ==========================================================================
+
+  /**
+   * has-session: Check if a session exists by name or ID.
+   *
+   * Flags: -t (target session name or ID)
+   */
+  private handleHasSession(parsed: ParsedCommand): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Missing target session (-t flag)', success: false };
+    }
+
+    const sessions = sessionService.getAllSessions();
+    const found = sessions.find(
+      (s) => s.id === targetFlag || s.name === targetFlag,
+    );
+
+    if (found) {
+      return { output: '', success: true };
+    }
+    return { output: `session not found: ${targetFlag}`, success: false };
+  }
+
+  /**
+   * kill-session: Kill a session and all its windows/panes/PTYs.
+   *
+   * Flags: -t (target session name or ID)
+   */
+  private handleKillSession(parsed: ParsedCommand): CommandResult {
+    const targetFlag = parsed.flags.get('t');
+    if (typeof targetFlag !== 'string') {
+      return { output: 'Missing target session (-t flag)', success: false };
+    }
+
+    // Find session by name or ID
+    const sessions = sessionService.getAllSessions();
+    const found = sessions.find(
+      (s) => s.id === targetFlag || s.name === targetFlag,
+    );
+
+    if (!found) {
+      return { output: `session not found: ${targetFlag}`, success: false };
+    }
+
+    const deleted = sessionService.deleteSession(found.id);
+    if (!deleted) {
+      return { output: `Failed to delete session: ${targetFlag}`, success: false };
+    }
+
+    logger.info('kill-session: session killed', { sessionId: found.id, name: found.name });
+    return { output: '', success: true };
+  }
+
+  /**
+   * send-keys: Send keystrokes to a target pane's PTY.
+   *
+   * Flags: -t (target pane), -l (literal keys)
+   * Positional: keys to send (remaining args)
+   *
+   * Special key names: Enter (\r), Space ( ), Escape (\x1b), Tab (\t),
+   * BSpace (\x7f), C-c (\x03), C-d (\x04), C-z (\x1a)
+   */
+  private handleSendKeys(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const paneId = this.resolvePaneTarget(parsed.flags.get('t'), ctx.paneId);
+
+    if (!paneId) {
+      return { output: 'No target pane specified', success: false };
+    }
+
+    if (!ptyManager.hasPty(paneId)) {
+      return { output: `Pane not found or no PTY: ${paneId}`, success: false };
+    }
+
+    // Collect all positional args as the keys to send
+    const keys = parsed.positional;
+    if (keys.length === 0) {
+      return { output: '', success: true };
+    }
+
+    // Special key name mapping
+    const SPECIAL_KEYS: Record<string, string> = {
+      'Enter': '\r',
+      'Space': ' ',
+      'Escape': '\x1b',
+      'Tab': '\t',
+      'BSpace': '\x7f',
+      'C-c': '\x03',
+      'C-d': '\x04',
+      'C-z': '\x1a',
+      'C-l': '\x0c',
+      'C-a': '\x01',
+      'C-e': '\x05',
+      'C-k': '\x0b',
+      'C-u': '\x15',
+      'C-w': '\x17',
+    };
+
+    // Build the data to write: process each key
+    const parts: string[] = [];
+    for (const key of keys) {
+      const special = SPECIAL_KEYS[key];
+      if (special !== undefined) {
+        parts.push(special);
+      } else {
+        parts.push(key);
+      }
+    }
+
+    const data = parts.join('');
+    ptyManager.write(paneId, data);
+
+    logger.info('send-keys: sent to pane', { paneId, keyCount: keys.length });
+    return { output: '', success: true };
+  }
+
+  /**
+   * kill-pane: Kill a pane's PTY and remove it from the layout.
+   *
+   * Flags: -t (target pane)
+   *
+   * If the killed pane is the last in a window, the window is also killed.
+   */
+  private handleKillPane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const paneId = this.resolvePaneTarget(parsed.flags.get('t'), ctx.paneId);
+
+    if (!paneId) {
+      return { output: 'No target pane specified', success: false };
+    }
+
+    // Find the pane's window
+    const pane = sessionService.getPane(paneId);
+    if (!pane) {
+      return { output: `Pane not found: ${paneId}`, success: false };
+    }
+
+    const window = sessionService.getWindow(pane.windowId);
+    if (!window) {
+      return { output: 'Window not found', success: false };
+    }
+
+    // Kill the PTY
+    if (ptyManager.hasPty(paneId)) {
+      ptyManager.kill(paneId);
+    }
+
+    const paneIds = getPaneIds(window.layout);
+
+    if (paneIds.length <= 1) {
+      // Last pane in window — kill the window
+      sessionService.deleteWindow(window.id);
+
+      broadcastToSession(ctx.sessionId, {
+        type: 'windowClosed',
+        payload: { windowId: window.id },
+      });
+
+      logger.info('kill-pane: last pane killed, window closed', { paneId, windowId: window.id });
+    } else {
+      // Extract pane from layout
+      const result = extractPane(window.layout, paneId);
+      if (result.extracted && result.remainingLayout) {
+        sessionService.updateWindowLayout(window.id, result.remainingLayout);
+      }
+
+      // Delete the pane record
+      sessionService.deletePane(paneId);
+
+      broadcastToSession(ctx.sessionId, {
+        type: 'paneClosed',
+        payload: { paneId, layout: result.remainingLayout ?? window.layout },
+      });
+
+      logger.info('kill-pane: pane killed', { paneId, windowId: window.id });
+    }
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * resize-pane: Resize a pane by adjusting layout sizes.
+   *
+   * Flags: -t (target pane), -x (width), -y (height), -Z (toggle zoom)
+   */
+  private handleResizePane(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const paneId = this.resolvePaneTarget(parsed.flags.get('t'), ctx.paneId);
+    const xFlag = parsed.flags.get('x');
+    const yFlag = parsed.flags.get('y');
+    const zoomFlag = parsed.flags.get('Z') === true;
+
+    if (!paneId) {
+      return { output: 'No target pane specified', success: false };
+    }
+
+    if (zoomFlag) {
+      // Toggle zoom is a stub for now
+      return { output: '', success: true };
+    }
+
+    // For -x and -y with percentage values, we'd need to adjust layout sizes
+    // For now, acknowledge the resize request (layout engine handles actual sizing)
+    if (typeof xFlag === 'string' || typeof yFlag === 'string') {
+      // Parse the values (may be percentage like "30%" or absolute like "80")
+      logger.info('resize-pane: resize requested', { paneId, x: xFlag, y: yFlag });
+      return { output: '', success: true };
+    }
+
+    return { output: '', success: true };
+  }
+
+  /**
+   * new-session: Create a new session.
+   *
+   * Flags: -d (detached), -s (name), -n (window name), -P (print),
+   *        -F (format), -c (cwd), -A (attach-or-create), -x (width), -y (height)
+   * Positional: command to run (after -- separator)
+   */
+  private handleNewSession(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    const nameFlag = parsed.flags.get('s');
+    const windowNameFlag = parsed.flags.get('n');
+    const cwdFlag = parsed.flags.get('c');
+    const printFlag = parsed.flags.get('P') === true;
+    const formatFlag = parsed.flags.get('F');
+    const attachOrCreate = parsed.flags.get('A') === true;
+
+    const sessionName = typeof nameFlag === 'string' ? nameFlag : `Session ${Date.now()}`;
+    const windowName = typeof windowNameFlag === 'string' ? windowNameFlag : undefined;
+    const cwd = typeof cwdFlag === 'string' ? cwdFlag : undefined;
+
+    // -A flag: if session already exists with this name, return its info
+    if (attachOrCreate) {
+      const sessions = sessionService.getAllSessions();
+      const existing = sessions.find((s) => s.name === sessionName);
+      if (existing) {
+        const fullSession = sessionService.getSession(existing.id);
+        if (fullSession) {
+          // Find the active pane
+          const activeWindow = fullSession.windows.find(
+            (w) => w.id === fullSession.activeWindowId,
+          ) ?? fullSession.windows[0];
+          const activePaneId = activeWindow?.panes[0]?.id ?? '';
+
+          if (printFlag && typeof formatFlag === 'string') {
+            const formatted = this.formatTmuxString(formatFlag, activePaneId, {
+              sessionId: fullSession.id,
+              windowId: activeWindow?.id ?? '',
+              paneId: activePaneId,
+            });
+            return { output: formatted, success: true };
+          }
+
+          if (printFlag) {
+            const tmuxId = ptyManager.getPaneTmuxId(activePaneId) ?? activePaneId;
+            return { output: tmuxId, success: true };
+          }
+
+          return { output: fullSession.id, success: true };
+        }
+      }
+    }
+
+    // Create new session
+    const createOpts: { name: string; cwd?: string } = { name: sessionName };
+    if (cwd !== undefined) createOpts.cwd = cwd;
+    const session = sessionService.createSession(createOpts);
+
+    // Rename the initial window if -n was provided
+    if (windowName && session.windows[0]) {
+      sessionService.renameWindow(session.windows[0].id, windowName);
+    }
+
+    // Spawn PTY for the initial pane
+    const initialWindow = session.windows[0];
+    const initialPane = initialWindow?.panes[0];
+    if (initialPane) {
+      ptyManager.spawn(initialPane.id, {
+        shell: 'default',
+        cols: initialPane.cols,
+        rows: initialPane.rows,
+        sessionId: session.id,
+        ...(cwd ? { cwd } : {}),
+      });
+    }
+
+    // If there's a command to run (positional args after --), send it to the pane
+    if (parsed.positional.length > 0 && initialPane) {
+      const cmd = parsed.positional.join(' ');
+      // Give the shell a moment to start, then send the command
+      setTimeout(() => {
+        ptyManager.write(initialPane.id, cmd + '\r');
+      }, 100);
+    }
+
+    // Broadcast session creation
+    broadcastToSession(session.id, {
+      type: 'windowCreated',
+      payload: { window: initialWindow },
+    });
+
+    logger.info('new-session: session created', {
+      sessionId: session.id,
+      name: sessionName,
+    });
+
+    // Handle -P -F output
+    const paneId = initialPane?.id ?? '';
+    const windowId = initialWindow?.id ?? '';
+
+    if (printFlag && typeof formatFlag === 'string') {
+      const formatted = this.formatTmuxString(formatFlag, paneId, {
+        sessionId: session.id,
+        windowId,
+        paneId,
+      });
+      return { output: formatted, success: true };
+    }
+
+    if (printFlag) {
+      const tmuxId = ptyManager.getPaneTmuxId(paneId) ?? paneId;
+      return { output: tmuxId, success: true };
+    }
+
+    return { output: session.id, success: true };
   }
 
   /**

@@ -245,10 +245,19 @@ export class CommandRegistry {
     const positional: string[] = [];
     let i = 1; // skip command token
 
+    let endOfFlags = false;
+
     while (i < tokens.length) {
       const token = tokens[i]!;
 
-      if (token.startsWith('-') && token.length > 1) {
+      // Handle `--` separator: everything after it is positional
+      if (token === '--' && !endOfFlags) {
+        endOfFlags = true;
+        i++;
+        continue;
+      }
+
+      if (!endOfFlags && token.startsWith('-') && token.length > 1) {
         // Could be a flag -- strip the leading dash
         const flagName = token.slice(1);
         const flagDef = flagLookup.get(flagName);

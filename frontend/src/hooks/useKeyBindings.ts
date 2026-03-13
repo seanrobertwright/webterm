@@ -515,6 +515,14 @@ function formatTmuxKeyForDisplay(tmuxKey: string): string {
 export function useGlobalKeyBindings(options: UseKeyBindingsOptions) {
   const bindingsHook = useKeyBindings(options);
 
+  // Expose handler globally so xterm's attachCustomKeyEventHandler can call it
+  useEffect(() => {
+    (globalThis as Record<string, unknown>).webtermKeyHandler = bindingsHook.handleKeyEvent;
+    return () => {
+      delete (globalThis as Record<string, unknown>).webtermKeyHandler;
+    };
+  }, [bindingsHook.handleKeyEvent]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;

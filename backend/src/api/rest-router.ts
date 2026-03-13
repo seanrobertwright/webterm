@@ -16,6 +16,7 @@ import {
   handleSaveSession,
 } from './routes/sessions.js';
 import { handleListKeybindings } from './routes/keybindings.js';
+import { handleExecuteCommand, handleListPanes } from './routes/commands.js';
 import { logger } from '../utils/logger.js';
 import { isWebTermError, toErrorResponse, ValidationError } from '../utils/errors.js';
 
@@ -78,6 +79,12 @@ registerRoute('POST', '/api/v1/sessions/:id/save', handleSaveSession);
 
 // Keybindings
 registerRoute('GET', '/api/v1/keybindings', handleListKeybindings);
+
+// Command execution (used by tmux shim)
+registerRoute('POST', '/api/v1/command', handleExecuteCommand);
+
+// Pane listing (used by tmux shim for list-panes)
+registerRoute('GET', '/api/v1/panes', handleListPanes);
 
 // ============================================================================
 // Request Handler

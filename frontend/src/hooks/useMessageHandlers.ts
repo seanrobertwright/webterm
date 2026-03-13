@@ -44,6 +44,16 @@ export function useMessageHandlers(): void {
           setLayout(layout);
           // Auto-focus the newly created pane
           setActivePane(pane.id);
+          // Update session store's window with new layout and pane
+          {
+            const win = useSessionStore.getState().windows.find(w => w.id === pane.windowId);
+            if (win) {
+              console.warn('[paneCreated] Updating window', pane.windowId, 'with new pane', pane.id, 'layout:', layout);
+              updateWindow(pane.windowId, { layout, panes: [...win.panes, pane] });
+            } else {
+              console.warn('[paneCreated] Window NOT FOUND for pane', pane.id, 'windowId:', pane.windowId, 'known windows:', useSessionStore.getState().windows.map(w => w.id));
+            }
+          }
           break;
         }
 
@@ -51,6 +61,16 @@ export function useMessageHandlers(): void {
           const { paneId, layout } = message.payload;
           removePane(paneId);
           setLayout(layout);
+          // Update session store's window with new layout and removed pane
+          {
+            const windowId = usePaneStore.getState().windowId;
+            if (windowId) {
+              const win = useSessionStore.getState().windows.find(w => w.id === windowId);
+              if (win) {
+                updateWindow(windowId, { layout, panes: win.panes.filter(p => p.id !== paneId) });
+              }
+            }
+          }
           break;
         }
 
@@ -63,6 +83,13 @@ export function useMessageHandlers(): void {
         case 'layoutUpdated': {
           const { layout } = message.payload;
           setLayout(layout);
+          // Update session store's window layout
+          {
+            const windowId = usePaneStore.getState().windowId;
+            if (windowId) {
+              updateWindow(windowId, { layout });
+            }
+          }
           break;
         }
 
@@ -99,7 +126,11 @@ export function useMessageHandlers(): void {
 
         case 'windowRenamed': {
           const { windowId, name } = message.payload;
-          updateWindow(windowId, { name });
+          // Only update if the name actually changed to avoid unnecessary re-renders
+          const existingWindow = useSessionStore.getState().windows.find(w => w.id === windowId);
+          if (!existingWindow || existingWindow.name !== name) {
+            updateWindow(windowId, { name });
+          }
           break;
         }
 
