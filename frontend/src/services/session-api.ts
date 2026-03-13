@@ -125,6 +125,29 @@ export async function saveSession(id: string): Promise<Session> {
   return handleResponse<Session>(response);
 }
 
+/**
+ * Import a session from an export payload
+ * POST /api/v1/sessions/import
+ */
+export async function importSessionApi(
+  data: import('@webterm/shared/index').SessionExport
+): Promise<{
+  session: SessionWithWindows;
+  paneIdMap: Record<string, string>;
+}> {
+  const response = await fetch(`${API_BASE}/sessions/import`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<{
+    session: SessionWithWindows;
+    paneIdMap: Record<string, string>;
+  }>(response);
+}
+
 // ============================================================================
 // Window API Functions
 // ============================================================================

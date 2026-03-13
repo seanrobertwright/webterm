@@ -10,6 +10,7 @@ import {
   deleteSession as apiDeleteSession,
   clearAllSessions,
 } from '../../services/session-api';
+import { importSession } from '../../services/import-service';
 import type { SessionListItem } from '@webterm/shared/models';
 
 export interface SessionPanelProps {
@@ -23,6 +24,7 @@ export interface SessionPanelProps {
 export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, currentSessionId }: SessionPanelProps) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [showClearAll, setShowClearAll] = useState(false);
 
   const refreshSessions = useCallback(() => {
@@ -74,6 +76,22 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
     }
   }, [currentSessionId, refreshSessions]);
 
+  const handleImport = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      const result = await importSession();
+      if (result) {
+        // Switch to the imported session (scrollback replay is already scheduled)
+        onRestore(result.sessionId);
+        refreshSessions();
+      }
+    } catch (err) {
+      console.error('[SessionPanel] Failed to import session:', err);
+    } finally {
+      setIsImporting(false);
+    }
+  }, [onRestore, refreshSessions]);
+
   if (!isOpen) return null;
 
   return (
@@ -94,6 +112,14 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <h2 className="text-lg font-bold text-green-400">Sessions</h2>
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => void handleImport()}
+              disabled={isImporting}
+              className="px-3 py-1.5 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-900/30 border border-blue-800/50 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+            >
+              {isImporting ? 'Importing...' : 'Import'}
+            </button>
             {sessions.length >= 2 && (
               <button
                 onClick={() => setShowClearAll(true)}
