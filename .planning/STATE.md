@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-03-13
 **Current phase:** 2 (Settings & UI Refinements)
-**Current plan:** 02 (next plan to execute)
+**Current plan:** 03 (next plan to execute)
 **Phase status:** In progress
 
 ## Progress
@@ -14,7 +14,7 @@
 
 ### Phase 02: Settings & UI Refinements
 - [x] 02-01: Connection status dot colors + Webterm logo (6ac1e62, 416e7f4)
-- [ ] 02-02: (next plan)
+- [x] 02-02: SettingsPanel restyle with theme vars + ThemeSelector moved from header (adc6e4b, b0601bd)
 - [ ] 02-03: (next plan)
 
 ## Session Log
@@ -26,6 +26,7 @@
 | 2026-03-13 | 01-02 completed | Session export with SerializeAddon scrollback capture and JSON download |
 | 2026-03-13 | 01-03 completed | Session import with file picker, backend import endpoint, and scrollback replay (27f48e9, d132886) |
 | 2026-03-13 | 02-01 completed | Connection status dots (green/yellow/red) + Webterm logo PNG (6ac1e62, 416e7f4) |
+| 2026-03-13 | 02-02 completed | SettingsPanel restyled with theme CSS vars + ThemeSelector moved from header into settings (adc6e4b, b0601bd) |
 
 ## Decisions
 
@@ -38,7 +39,8 @@
 - Connection dot colors: explicit semantic classes (bg-green-500/bg-destructive) not theme accent
 - Logo PNG resized to 256x256 (62KB) using ImageMagick — extracted raw was 3.4MB at 1767x1731px
 - Both disconnected and exited states use bg-destructive (red) — both mean terminal not usable
+- [Phase 02-settings-ui-refinements]: ThemeSelector moved from Header to SettingsPanel; xterm themeName kept in store but removed from settings UI
 
 ## Next Steps
 
-- Phase 02 in progress. 02-01 complete. Execute 02-02 next.
+- Phase 02 in progress. 02-02 complete. Execute 02-03 next.
