@@ -4,7 +4,8 @@
 
 import { useEffect } from 'react';
 import { useSettingsStore } from '../../stores/settings-store';
-import { themeNames, fontFamilyOptions } from '../../config/terminal-themes';
+import { fontFamilyOptions } from '../../config/terminal-themes';
+import { ThemeSelector } from '../layout/ThemeSelector';
 
 export interface SettingsPanelProps {
   isOpen: boolean;
@@ -12,8 +13,7 @@ export interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
-  const { fontSize, fontFamily, themeName, setFontSize, setFontFamily, setThemeName } =
-    useSettingsStore();
+  const { fontSize, fontFamily, setFontSize, setFontFamily } = useSettingsStore();
 
   // Close on Escape
   useEffect(() => {
@@ -40,13 +40,13 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
       />
 
       {/* Panel */}
-      <div className="fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col">
+      <div className="fixed inset-y-0 right-0 z-50 w-80 max-w-[85vw] bg-card border-l border-border shadow-2xl flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-700">
-          <h2 className="text-lg font-bold text-green-400">Settings</h2>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="text-lg font-bold text-primary">Settings</h2>
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white rounded transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
+            className="p-2 text-muted-foreground hover:text-foreground rounded transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
             type="button"
             aria-label="Close"
           >
@@ -60,7 +60,7 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           {/* Font Size */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Font Size: {fontSize}px
             </label>
             <input
@@ -69,9 +69,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
               max={32}
               value={fontSize}
               onChange={(e) => setFontSize(Number(e.target.value))}
-              className="w-full accent-green-500"
+              className="w-full accent-primary"
             />
-            <div className="flex justify-between text-xs text-gray-500 mt-1">
+            <div className="flex justify-between text-xs text-muted-foreground mt-1">
               <span>8</span>
               <span>32</span>
             </div>
@@ -79,13 +79,13 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
           {/* Font Family */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-foreground mb-2">
               Font Family
             </label>
             <select
               value={fontFamily}
               onChange={(e) => setFontFamily(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-600 text-gray-200 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full bg-secondary border border-border text-foreground rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {fontFamilyOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -95,27 +95,12 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
             </select>
           </div>
 
-          {/* Theme */}
+          {/* UI Theme */}
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Color Theme
+            <label className="block text-sm font-medium text-foreground mb-2">
+              UI Theme
             </label>
-            <div className="space-y-2">
-              {themeNames.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => setThemeName(name)}
-                  className={`w-full text-left px-3 py-2 rounded border transition-colors ${
-                    themeName === name
-                      ? 'border-green-500 bg-green-900/30 text-green-400'
-                      : 'border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500'
-                  }`}
-                  type="button"
-                >
-                  {name.charAt(0).toUpperCase() + name.slice(1).replace('-', ' ')}
-                </button>
-              ))}
-            </div>
+            <ThemeSelector />
           </div>
         </div>
       </div>
