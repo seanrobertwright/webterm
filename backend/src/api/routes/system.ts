@@ -1,14 +1,20 @@
 /**
  * System info endpoint
  * GET /api/v1/system/info
+ * POST /api/v1/system/pick-directory
+ * POST /api/v1/system/validate-directory
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { execSync } from 'node:child_process';
+import { exec, execSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { sendJson } from '../rest-router.js';
 import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
+
+const execAsync = promisify(exec);
 
 /** Shell information */
 interface ShellInfo {
@@ -187,4 +193,119 @@ export async function handleSystemInfo(
   };
 
   sendJson(res, 200, response);
+}
+
+/**
+ * Handle pick-directory request
+ * Opens a native OS folder picker dialog and returns the selected path.
+ * POST /api/v1/system/pick-directory
+ */
+export async function handlePickDirectory(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  _body: unknown
+): Promise<void> {
+  const platform = os.platform();
+
+  try {
+    let selectedPath: string | null = null;
+
+    if (platform === 'win32') {
+      // Windows: Use PowerShell FolderBrowserDialog
+      const psScript = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+        "$dialog.Description = 'Select default start directory'",
+        '$dialog.ShowNewFolderButton = $true',
+        '$result = $dialog.ShowDialog()',
+        'if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }',
+      ].join('; ');
+
+      const { stdout } = await execAsync(`powershell -NoProfile -Command "${psScript}"`, {
+        timeout: 60000,
+      });
+      const trimmed = stdout.trim();
+      selectedPath = trimmed.length > 0 ? trimmed : null;
+    } else if (platform === 'darwin') {
+      // macOS: Use osascript choose folder
+      const { stdout } = await execAsync(
+        "osascript -e 'POSIX path of (choose folder with prompt \"Select default start directory\")'",
+        { timeout: 60000 }
+      );
+      const trimmed = stdout.trim();
+      // Remove trailing slash if present
+      selectedPath = trimmed.length > 0 ? trimmed.replace(/\/$/, '') : null;
+    } else {
+      // Linux: Use zenity
+      const { stdout } = await execAsync('zenity --file-selection --directory --title="Select default start directory"', {
+        timeout: 60000,
+      });
+      const trimmed = stdout.trim();
+      selectedPath = trimmed.length > 0 ? trimmed : null;
+    }
+
+    if (selectedPath === null) {
+      // User cancelled the dialog
+      sendJson(res, 200, { path: null, cancelled: true });
+      return;
+    }
+
+    // Validate the selected path exists and is a directory
+    try {
+      const stat = fs.statSync(selectedPath);
+      if (!stat.isDirectory()) {
+        sendJson(res, 200, { path: null, error: 'Selected path is not a directory' });
+        return;
+      }
+    } catch {
+      sendJson(res, 200, { path: null, error: 'Selected path does not exist or is inaccessible' });
+      return;
+    }
+
+    sendJson(res, 200, { path: selectedPath });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // If the user cancelled in osascript, it throws an error — treat as cancel
+    if (message.includes('User canceled') || message.includes('cancelled')) {
+      sendJson(res, 200, { path: null, cancelled: true });
+      return;
+    }
+    logger.error('Failed to open folder picker', { error: message });
+    sendJson(res, 500, { error: `Failed to open folder picker: ${message}` });
+  }
+}
+
+/**
+ * Handle validate-directory request
+ * Checks if a directory path exists and is accessible.
+ * POST /api/v1/system/validate-directory
+ * Body: { path: string }
+ * Returns: { valid: boolean, error?: string }
+ */
+export async function handleValidateDirectory(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  body: unknown
+): Promise<void> {
+  const bodyObj = body as { path?: unknown } | undefined;
+  const dirPath = bodyObj?.path;
+
+  if (!dirPath || typeof dirPath !== 'string') {
+    sendJson(res, 400, { valid: false, error: 'No path provided' });
+    return;
+  }
+
+  try {
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) {
+      sendJson(res, 200, { valid: false, error: 'Path is not a directory' });
+      return;
+    }
+    fs.accessSync(dirPath, fs.constants.R_OK | fs.constants.X_OK);
+    sendJson(res, 200, { valid: true });
+  } catch {
+    sendJson(res, 200, { valid: false, error: 'Directory does not exist or is inaccessible' });
+  }
 }

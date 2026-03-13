@@ -6,7 +6,7 @@
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleHealthCheck } from './routes/health.js';
-import { handleSystemInfo } from './routes/system.js';
+import { handleSystemInfo, handlePickDirectory, handleValidateDirectory } from './routes/system.js';
 import {
   handleListSessions,
   handleGetSession,
@@ -72,6 +72,8 @@ registerRoute('GET', '/health', handleHealthCheck);
 
 // System info
 registerRoute('GET', '/api/v1/system/info', handleSystemInfo);
+registerRoute('POST', '/api/v1/system/pick-directory', handlePickDirectory);
+registerRoute('POST', '/api/v1/system/validate-directory', handleValidateDirectory);
 
 // Sessions
 registerRoute('GET', '/api/v1/sessions', handleListSessions);

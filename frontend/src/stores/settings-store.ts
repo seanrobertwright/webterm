@@ -9,12 +9,14 @@ export interface SettingsState {
   fontSize: number;
   fontFamily: string;
   themeName: string;
+  defaultStartDir: string;
 }
 
 export interface SettingsActions {
   setFontSize: (fontSize: number) => void;
   setFontFamily: (fontFamily: string) => void;
   setThemeName: (themeName: string) => void;
+  setDefaultStartDir: (dir: string) => void;
 }
 
 export type SettingsStore = SettingsState & SettingsActions;
@@ -23,6 +25,7 @@ const defaultSettings: SettingsState = {
   fontSize: 14,
   fontFamily: "'JetBrains Mono', monospace",
   themeName: 'default',
+  defaultStartDir: '',
 };
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -40,6 +43,10 @@ export const useSettingsStore = create<SettingsStore>()(
 
       setThemeName: (themeName) => {
         set({ themeName });
+      },
+
+      setDefaultStartDir: (defaultStartDir) => {
+        set({ defaultStartDir });
       },
     }),
     {
