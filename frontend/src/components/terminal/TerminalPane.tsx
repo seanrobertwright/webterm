@@ -1,9 +1,11 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useMemo } from 'react';
+import type { ITheme } from '@xterm/xterm';
 import type { ConnectionState, ShellType } from '@webterm/shared/models';
 import { Terminal, TerminalHandle } from './Terminal';
 import { ConnectionStatus } from './ConnectionStatus';
 import { useSettingsStore } from '../../stores/settings-store';
 import { terminalThemes } from '../../config/terminal-themes';
+import { useTheme } from '../../providers/ThemeProvider';
 
 // Global map to store terminal write functions
 declare global {
@@ -62,7 +64,25 @@ export function TerminalPane({
 }: TerminalPaneProps) {
   const terminalRef = useRef<TerminalHandle>(null);
   const { fontSize, fontFamily, themeName } = useSettingsStore();
-  const terminalTheme = (terminalThemes[themeName] ?? terminalThemes['default']) as import('@xterm/xterm').ITheme;
+  const { theme: uiTheme } = useTheme();
+
+  // Build xterm.js theme from CSS custom properties so terminal colors follow
+  // the active theGridcn theme. Falls back to the settings-store terminal theme.
+  const terminalTheme = useMemo((): ITheme => {
+    const base = (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme;
+    const style = getComputedStyle(document.documentElement);
+    const css = (v: string): string | null => {
+      const val = style.getPropertyValue(v).trim();
+      return val || null;
+    };
+    return {
+      ...base,
+      ...(css('--terminal-bg') ? { background: css('--terminal-bg')! } : {}),
+      ...(css('--terminal-fg') ? { foreground: css('--terminal-fg')! } : {}),
+      ...(css('--terminal-cursor') ? { cursor: css('--terminal-cursor')! } : {}),
+      ...(css('--terminal-selection') ? { selectionBackground: css('--terminal-selection')! } : {}),
+    };
+  }, [themeName, uiTheme]);
 
   // Register terminal write function and handle globally for output and clipboard
   useEffect(() => {
@@ -192,7 +212,7 @@ export function TerminalPane({
 
       {/* Focus indicator border */}
       {isFocused && (
-        <div className="absolute inset-0 pointer-events-none border-2 border-green-500 rounded" />
+        <div className="absolute inset-0 pointer-events-none border-2 border-primary rounded" />
       )}
     </div>
   );

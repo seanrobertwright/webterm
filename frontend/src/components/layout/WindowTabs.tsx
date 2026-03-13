@@ -51,7 +51,7 @@ export function WindowTabs({
       className={`
         flex items-center
         h-8
-        bg-gray-900 border-b border-gray-800
+        bg-card border-b border-border
         overflow-x-auto
         ${className}
       `}
@@ -70,12 +70,12 @@ export function WindowTabs({
               flex items-center gap-2
               h-full px-4
               text-sm font-medium
-              border-r border-gray-800
+              border-r border-border
               transition-colors
-              focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-500/50
+              focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring/50
               ${isActive
-                ? 'bg-gray-800 text-green-400 border-b-2 border-b-green-500'
-                : 'bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                ? 'bg-secondary text-primary border-b-2 border-b-primary'
+                : 'bg-card text-muted-foreground hover:bg-secondary hover:text-foreground'
               }
             `}
             type="button"
@@ -84,7 +84,7 @@ export function WindowTabs({
             aria-controls={`window-panel-${window.id}`}
           >
             {/* Window index */}
-            <span className="text-xs text-gray-500 font-mono">
+            <span className="text-xs text-muted-foreground font-mono">
               {window.index}:
             </span>
 
@@ -104,7 +104,7 @@ export function WindowTabs({
                 }}
                 className="
                   ml-1 p-0.5
-                  text-gray-500 hover:text-red-400
+                  text-muted-foreground hover:text-destructive
                   rounded
                   transition-colors
                 "
@@ -139,9 +139,9 @@ export function WindowTabs({
           className="
             flex items-center justify-center
             h-full w-8
-            text-gray-500 hover:text-green-400
+            text-muted-foreground hover:text-primary
             transition-colors
-            focus:outline-none focus:ring-2 focus:ring-inset focus:ring-green-500/50
+            focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring/50
           "
           type="button"
           aria-label="Create new window"

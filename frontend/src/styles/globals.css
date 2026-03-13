@@ -1,8 +1,8 @@
+@import './thegridcn-themes.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import './thegridcn-themes.css';
 
 :root {
   --radius: 0.5rem;
