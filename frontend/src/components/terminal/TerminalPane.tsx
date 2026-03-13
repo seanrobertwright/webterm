@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useMemo } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import type { ITheme } from '@xterm/xterm';
 import type { ConnectionState, ShellType } from '@webterm/shared/models';
 import { Terminal, TerminalHandle } from './Terminal';
@@ -67,21 +67,31 @@ export function TerminalPane({
   const { theme: uiTheme } = useTheme();
 
   // Build xterm.js theme from CSS custom properties so terminal colors follow
-  // the active theGridcn theme. Falls back to the settings-store terminal theme.
-  const terminalTheme = useMemo((): ITheme => {
-    const base = (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme;
-    const style = getComputedStyle(document.documentElement);
-    const css = (v: string): string | null => {
-      const val = style.getPropertyValue(v).trim();
-      return val || null;
-    };
-    return {
-      ...base,
-      ...(css('--terminal-bg') ? { background: css('--terminal-bg')! } : {}),
-      ...(css('--terminal-fg') ? { foreground: css('--terminal-fg')! } : {}),
-      ...(css('--terminal-cursor') ? { cursor: css('--terminal-cursor')! } : {}),
-      ...(css('--terminal-selection') ? { selectionBackground: css('--terminal-selection')! } : {}),
-    };
+  // the active theGridcn theme. Uses useEffect to read computed styles AFTER
+  // the DOM has updated the data-theme attribute (which happens in ThemeProvider's
+  // useEffect). Falls back to the settings-store terminal theme.
+  const [terminalTheme, setTerminalTheme] = useState<ITheme>(
+    () => (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme
+  );
+
+  useEffect(() => {
+    // requestAnimationFrame ensures the data-theme attribute has been applied
+    // and computed styles are current before we read them.
+    requestAnimationFrame(() => {
+      const base = (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme;
+      const style = getComputedStyle(document.documentElement);
+      const css = (v: string): string | null => {
+        const val = style.getPropertyValue(v).trim();
+        return val || null;
+      };
+      setTerminalTheme({
+        ...base,
+        ...(css('--terminal-bg') ? { background: css('--terminal-bg')! } : {}),
+        ...(css('--terminal-fg') ? { foreground: css('--terminal-fg')! } : {}),
+        ...(css('--terminal-cursor') ? { cursor: css('--terminal-cursor')! } : {}),
+        ...(css('--terminal-selection') ? { selectionBackground: css('--terminal-selection')! } : {}),
+      });
+    });
   }, [themeName, uiTheme]);
 
   // Register terminal write function and handle globally for output and clipboard

@@ -223,12 +223,15 @@ function LayoutNode({
     };
 
     const isActive = activePaneId === pane.id;
+    const style = getComputedStyle(document.documentElement);
+    const themePrimary = style.getPropertyValue('--pane-border-focus').trim() || '#22c55e';
+    const themeBorder = style.getPropertyValue('--pane-border').trim() || '#4b5563';
     const prefixBorderColor = '#eab308'; // yellow-500 for prefix mode
     const currentBorderColor = prefixActive
       ? prefixBorderColor
       : isActive
-        ? (activeBorderColor ?? '#22c55e')  // green-500 default
-        : (borderColor ?? '#4b5563');        // gray-600 default
+        ? (activeBorderColor ?? themePrimary)
+        : (borderColor ?? themeBorder);
 
     const borderLabel = paneBorderStatus !== 'off' && paneBorderStatus !== undefined
       ? (pane.title ?? pane.currentCommand ?? `pane ${pane.id.slice(0, 8)}`)
@@ -246,7 +249,7 @@ function LayoutNode({
             className={`absolute left-2 z-10 max-w-[50%] truncate rounded px-1.5 py-0.5 text-xs font-mono ${
               prefixActive
                 ? 'bg-yellow-900/80 text-yellow-300'
-                : isActive ? 'bg-green-900/80 text-green-300' : 'bg-gray-800/80 text-gray-400'
+                : isActive ? 'bg-secondary text-primary' : 'bg-card text-muted-foreground'
             }`}
             style={paneBorderStatus === 'bottom' ? { bottom: -1 } : { top: -1 }}
           >

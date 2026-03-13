@@ -164,9 +164,7 @@ export function Header({
 
       {/* Right: Connection status + Theme selector + Settings */}
       <div className="flex items-center gap-2">
-        <div className="relative">
-          <ConnectionStatus state={connectionState} className="static" />
-        </div>
+        <ConnectionStatus state={connectionState} />
         <ThemeSelector />
         {onSettingsClick && (
           <button

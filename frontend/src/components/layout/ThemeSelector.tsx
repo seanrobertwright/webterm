@@ -45,7 +45,7 @@ export function ThemeSelector() {
         onClick={() => setIsOpen((prev) => !prev)}
         className="
           flex items-center gap-1.5 px-2 py-1
-          text-sm text-gray-400 hover:text-gray-200
+          text-sm text-muted-foreground hover:text-foreground
           rounded transition-colors
           focus:outline-none focus:ring-2 focus:ring-ring/50
         "
@@ -54,7 +54,7 @@ export function ThemeSelector() {
         aria-expanded={isOpen}
       >
         <span
-          className="w-3 h-3 rounded-full border border-gray-600 flex-shrink-0"
+          className="w-3 h-3 rounded-full border border-border flex-shrink-0"
           style={{ backgroundColor: currentTheme?.color }}
         />
         <svg
@@ -73,7 +73,7 @@ export function ThemeSelector() {
           className="
             absolute right-0 top-full mt-1 z-50
             w-44 py-1
-            bg-gray-900 border border-gray-700 rounded-md shadow-lg
+            bg-card border border-border rounded-md shadow-lg
           "
           role="listbox"
           aria-label="Theme options"
@@ -85,18 +85,18 @@ export function ThemeSelector() {
               className={`
                 w-full flex items-center gap-2.5 px-3 py-1.5
                 text-sm text-left transition-colors
-                ${t.id === theme ? 'bg-gray-800 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/60'}
+                ${t.id === theme ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'}
               `}
               type="button"
               role="option"
               aria-selected={t.id === theme}
             >
               <span
-                className="w-3 h-3 rounded-full border border-gray-600 flex-shrink-0"
+                className="w-3 h-3 rounded-full border border-border flex-shrink-0"
                 style={{ backgroundColor: t.color }}
               />
               <span className="flex-1">{t.name}</span>
-              <span className="text-xs text-gray-500">{t.description}</span>
+              <span className="text-xs text-muted-foreground">{t.description}</span>
             </button>
           ))}
         </div>
