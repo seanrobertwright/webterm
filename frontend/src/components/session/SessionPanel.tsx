@@ -4,7 +4,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { SessionList } from './SessionList';
-import { fetchSessions, deleteSession as apiDeleteSession } from '../../services/session-api';
+import { ClearAllDialog } from './ClearAllDialog';
+import {
+  fetchSessions,
+  deleteSession as apiDeleteSession,
+  clearAllSessions,
+} from '../../services/session-api';
 import type { SessionListItem } from '@webterm/shared/models';
 
 export interface SessionPanelProps {
@@ -18,17 +23,21 @@ export interface SessionPanelProps {
 export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, currentSessionId }: SessionPanelProps) {
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showClearAll, setShowClearAll] = useState(false);
 
-  // Fetch sessions when panel opens
-  useEffect(() => {
-    if (!isOpen) return;
-
+  const refreshSessions = useCallback(() => {
     setIsLoading(true);
     fetchSessions()
       .then(setSessions)
       .catch((err) => console.error('[SessionPanel] Failed to fetch sessions:', err))
       .finally(() => setIsLoading(false));
-  }, [isOpen]);
+  }, []);
+
+  // Fetch sessions when panel opens
+  useEffect(() => {
+    if (!isOpen) return;
+    refreshSessions();
+  }, [isOpen, refreshSessions]);
 
   // Close on Escape
   useEffect(() => {
@@ -54,6 +63,17 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
     onClose();
   }, [onRestore, onClose]);
 
+  const handleClearAll = useCallback(async () => {
+    if (!currentSessionId) return;
+    try {
+      await clearAllSessions(currentSessionId);
+      setShowClearAll(false);
+      refreshSessions();
+    } catch (err) {
+      console.error('[SessionPanel] Failed to clear all sessions:', err);
+    }
+  }, [currentSessionId, refreshSessions]);
+
   if (!isOpen) return null;
 
   return (
@@ -73,16 +93,27 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <h2 className="text-lg font-bold text-green-400">Sessions</h2>
-          <button
-            onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white rounded transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
-            type="button"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {sessions.length >= 2 && (
+              <button
+                onClick={() => setShowClearAll(true)}
+                className="px-3 py-1.5 text-xs text-red-400 hover:text-red-300 hover:bg-red-900/30 border border-red-800/50 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-red-500"
+                type="button"
+              >
+                Clear All
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-white rounded transition-colors focus:outline-none focus:ring-2 focus:ring-green-500"
+              type="button"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* New Session button */}
@@ -107,6 +138,15 @@ export function SessionPanel({ isOpen, onClose, onRestore, onNewSession, current
           />
         </div>
       </div>
+
+      {/* Clear All confirmation dialog */}
+      {showClearAll && (
+        <ClearAllDialog
+          sessionCount={sessions.length - 1}
+          onConfirm={() => void handleClearAll()}
+          onCancel={() => setShowClearAll(false)}
+        />
+      )}
     </>
   );
 }

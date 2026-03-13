@@ -95,6 +95,23 @@ export async function deleteSession(id: string): Promise<void> {
 }
 
 /**
+ * Clear all sessions except the active one
+ * DELETE /api/v1/sessions
+ */
+export async function clearAllSessions(
+  keepSessionId: string
+): Promise<{ deleted: number }> {
+  const response = await fetch(`${API_BASE}/sessions`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ keepSessionId }),
+  });
+  return handleResponse<{ deleted: number }>(response);
+}
+
+/**
  * Save session state (persist to disk)
  * POST /api/v1/sessions/:id/save
  */
