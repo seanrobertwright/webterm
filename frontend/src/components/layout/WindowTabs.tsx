@@ -84,7 +84,7 @@ export function WindowTabs({
             aria-controls={`window-panel-${window.id}`}
           >
             {/* Window index */}
-            <span className="text-xs text-muted-foreground font-mono">
+            <span className={`text-xs font-mono ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
               {window.index}:
             </span>
 

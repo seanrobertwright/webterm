@@ -199,6 +199,7 @@ export function StatusBar({
         flex items-center
         h-6 min-h-[1.5rem]
         bg-card text-primary
+        border-t border-border
         font-mono text-xs leading-6
         select-none overflow-hidden
       `}

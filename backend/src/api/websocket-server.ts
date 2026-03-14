@@ -363,20 +363,26 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
 
       // If the pane's window has auto-rename enabled, update the window name.
       // Derive a short display name from the title:
-      //   - If it looks like a file path (contains \ or /), use just the filename
-      //     without extension (e.g. "C:\Program Files\PowerShell\7\pwsh.exe" -> "pwsh")
-      //   - Otherwise use the title as-is (e.g. "~/projects" stays "~/projects")
+      //   - Executable paths (e.g. "C:\...\pwsh.exe") → filename without extension ("pwsh")
+      //   - Directory paths (e.g. "C:\Users\sean\Projects") → last component ("Projects")
+      //   - Home directory or root (e.g. "C:\Users\sean", "/") → last component or "/"
+      //   - User home shorthand ("~") → "~"
+      //   - Otherwise use title as-is
       const pane = sessionService.getPane(paneId);
       if (pane) {
         const window = sessionService.getWindow(pane.windowId);
         if (window && window.autoRename) {
           let displayName = title;
-          // Detect executable paths (contain path separators AND end with an extension)
           const isExePath = /[/\\]/.test(title) && /\.\w+$/.test(title);
           if (isExePath) {
             // Extract filename without extension
             const basename = title.replace(/^.*[/\\]/, '');
             displayName = basename.replace(/\.\w+$/, '');
+          } else if (/[/\\]/.test(title)) {
+            // Directory path — extract last component
+            const trimmed = title.replace(/[/\\]+$/, ''); // strip trailing slashes
+            const lastSeg = trimmed.replace(/^.*[/\\]/, '');
+            displayName = lastSeg || '/';
           }
           sessionService.renameWindow(window.id, displayName);
           broadcastJsonToSession(sessionId, {

@@ -79,17 +79,31 @@ export function TerminalPane({
     // and computed styles are current before we read them.
     requestAnimationFrame(() => {
       const base = (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme;
-      const style = getComputedStyle(document.documentElement);
-      const css = (v: string): string | null => {
-        const val = style.getPropertyValue(v).trim();
-        return val || null;
+
+      // Resolve a CSS variable to a browser-computed color (hex/rgb).
+      // oklch() values aren't understood by xterm.js, so we force the browser
+      // to resolve them by assigning to a temp element and reading back.
+      const resolveColor = (varName: string): string | null => {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        if (!raw) return null;
+        const el = document.createElement('div');
+        el.style.color = raw;
+        document.body.appendChild(el);
+        const resolved = getComputedStyle(el).color;
+        document.body.removeChild(el);
+        return resolved || null;
       };
+
+      const bg = resolveColor('--terminal-bg');
+      const fg = resolveColor('--terminal-fg');
+      const cur = resolveColor('--terminal-cursor');
+      const sel = resolveColor('--terminal-selection');
       setTerminalTheme({
         ...base,
-        ...(css('--terminal-bg') ? { background: css('--terminal-bg')! } : {}),
-        ...(css('--terminal-fg') ? { foreground: css('--terminal-fg')! } : {}),
-        ...(css('--terminal-cursor') ? { cursor: css('--terminal-cursor')! } : {}),
-        ...(css('--terminal-selection') ? { selectionBackground: css('--terminal-selection')! } : {}),
+        ...(bg ? { background: bg } : {}),
+        ...(fg ? { foreground: fg } : {}),
+        ...(cur ? { cursor: cur } : {}),
+        ...(sel ? { selectionBackground: sel } : {}),
       });
     });
   }, [themeName, uiTheme]);

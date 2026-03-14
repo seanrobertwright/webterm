@@ -6,6 +6,17 @@ import { ContextMenu } from '../ContextMenu';
 import type { ContextMenuItem } from '../ContextMenu';
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/** Count leaf panes in a layout tree */
+function countLeaves(layout: Layout): number {
+  if (layout.type === 'leaf') return 1;
+  if (!layout.children) return 0;
+  return layout.children.reduce((sum, child) => sum + countLeaves(child), 0);
+}
+
+// ============================================================================
 // Pane border color mapping (tmux-compatible color names)
 // ============================================================================
 
@@ -118,6 +129,8 @@ interface LayoutNodeProps {
   paneBorderStatus?: 'top' | 'bottom' | 'off' | undefined;
   /** Whether prefix mode is active (changes border color) */
   prefixActive?: boolean | undefined;
+  /** Whether this is the only pane (hides border like tmux) */
+  isSinglePane?: boolean;
   className?: string;
   /** Path to this node in the layout tree */
   path: number[];
@@ -140,6 +153,7 @@ function LayoutNode({
   activeBorderColor,
   paneBorderStatus,
   prefixActive,
+  isSinglePane,
   path,
   className = '',
 }: LayoutNodeProps) {
@@ -237,11 +251,11 @@ function LayoutNode({
     return (
       <div
         className="w-full h-full relative"
-        style={{ border: `2px solid ${currentBorderColor}`, transition: 'border-color 150ms ease' }}
+        style={isSinglePane ? undefined : { border: `2px solid ${currentBorderColor}`, transition: 'border-color 150ms ease' }}
         onContextMenu={handleContextMenu}
       >
         {/* Pane border label */}
-        {borderLabel && (
+        {!isSinglePane && borderLabel && (
           <div
             className={`absolute left-2 z-10 max-w-[50%] truncate rounded px-1.5 py-0.5 text-xs font-mono ${
               prefixActive
@@ -380,6 +394,9 @@ export function PaneContainer(props: PaneContainerProps) {
   const borderColor = paneBorderStyle ? parseBorderStyle(paneBorderStyle) : undefined;
   const activeBorderColor = paneActiveBorderStyle ? parseBorderStyle(paneActiveBorderStyle) : undefined;
 
+  // In tmux, a single pane has no border
+  const isSinglePane = countLeaves(layout) === 1;
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
@@ -433,6 +450,7 @@ export function PaneContainer(props: PaneContainerProps) {
     if (activeBorderColor !== undefined) zoomedProps.activeBorderColor = activeBorderColor;
     zoomedProps.paneBorderStatus = paneBorderStatus;
     if (prefixActive !== undefined) zoomedProps.prefixActive = prefixActive;
+    zoomedProps.isSinglePane = true;
     return (
       <div className={`w-full h-full overflow-hidden ${className}`}>
         <LayoutNode {...zoomedProps} />
@@ -461,6 +479,7 @@ export function PaneContainer(props: PaneContainerProps) {
         activeBorderColor={activeBorderColor}
         paneBorderStatus={paneBorderStatus}
         prefixActive={prefixActive}
+        isSinglePane={isSinglePane}
         {...rest}
       />
       {contextMenu && (
