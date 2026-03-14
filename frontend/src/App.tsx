@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSettingsStore } from './stores/settings-store';
 import { useShallow } from 'zustand/react/shallow';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PaneContainer } from './components/layout/PaneContainer';
@@ -10,28 +11,34 @@ import { ClipboardNotification } from './components/ui/ClipboardNotification';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { usePaneStore } from './stores/pane-store';
 import { useSessionStore } from './stores/session-store';
-import { useKeyBindings, type UseKeyBindingsOptions } from './hooks/useKeyBindings';
+import { useKeybindingStore } from './stores/keybinding-store';
+import { useGlobalKeyBindings, type UseKeyBindingsOptions } from './hooks/useKeyBindings';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useMessageHandlers } from './hooks/useMessageHandlers';
 import { useClipboard } from './hooks/useClipboard';
 import { DisconnectionOverlay } from './components/terminal/DisconnectionOverlay';
+import { StatusBar } from './components/StatusBar';
 import { findAdjacentPaneId } from './utils/layout-navigation';
 import {
   saveSession as apiSaveSession,
   updateSession as apiUpdateSession,
+  createSession as apiCreateSession,
   fetchSessions,
-  fetchSession,
 } from './services/session-api';
+import { fetchKeybindings } from './services/keybinding-api';
+import { getWebSocketClient } from './services/websocket-client';
 import type { ConnectionState } from '@webterm/shared/models';
 import type { KeybindingAction } from './types';
 
 declare global {
   var terminalRefs: Map<string, (data: string | Uint8Array) => void>;
+  /** Global keybinding handler — returns false when the key is consumed */
+  var webtermKeyHandler: ((event: KeyboardEvent) => boolean) | null;
 }
 
 function App() {
   const { layout, activePane, panes, zoomedPane, setActivePane, toggleZoom } = usePaneStore();
-  const { currentSession, windows, activeWindowId, setActiveWindow, setSavedSessions, updateSession } = useSessionStore();
+  const { currentSession, windows, activeWindowId, setActiveWindow, setSavedSessions, updateSession, updateWindow } = useSessionStore();
   const sortedWindows = useSessionStore(
     useShallow((state) => [...state.windows].sort((a, b) => a.index - b.index))
   );
@@ -57,16 +64,48 @@ function App() {
 
   const {
     connectionState: wsState,
-    sessionId,
+    sessionId: wsSessionId,
     sendInput,
     sendResize,
-    sendMessage
+    sendMessage,
+    switchSession,
   } = useWebSocket({
     onOutput: handleOutput,
   });
 
+  // The WebSocket client stores sessionId internally when it receives the
+  // 'connected' message. The React state (wsSessionId) may not be set because
+  // useMessageHandlers overwrites the onMessage callback. Use a getter that
+  // reads from the client as a reliable fallback.
+  const getSessionId = useCallback(
+    () => wsSessionId ?? getWebSocketClient().currentSessionId,
+    [wsSessionId]
+  );
+
   // Set up message handlers for WebSocket events
   useMessageHandlers();
+
+  // Sync pane-store metadata when active window changes (for keybindings/navigation)
+  // Note: we do NOT use setInitialState here — that would re-create the panes map
+  // and cause React to unmount terminals. We only sync layout/windowId/activePane.
+  const { setLayout: setPaneLayout, setWindowId: setPaneWindowId, windowId: paneWindowId } = usePaneStore();
+  useEffect(() => {
+    if (!activeWindowId || activeWindowId === paneWindowId) return;
+    const activeWindow = windows.find((w) => w.id === activeWindowId);
+    if (activeWindow) {
+      setPaneWindowId(activeWindowId);
+      setPaneLayout(activeWindow.layout);
+      // Set active pane to first pane of the window if current activePane isn't in this window
+      const currentActive = usePaneStore.getState().activePane;
+      const paneIds = activeWindow.panes.map(p => p.id);
+      if (!currentActive || !paneIds.includes(currentActive)) {
+        const firstPane = paneIds[0] ?? null;
+        if (firstPane) {
+          setActivePane(firstPane);
+        }
+      }
+    }
+  }, [activeWindowId, paneWindowId, windows, setPaneWindowId, setPaneLayout, setActivePane]);
 
   // T006: Load saved sessions on app start
   useEffect(() => {
@@ -74,6 +113,19 @@ function App() {
       .then(setSavedSessions)
       .catch((err) => console.error('[App] Failed to load saved sessions:', err));
   }, [setSavedSessions]);
+
+  // Load keybindings from backend on app start
+  const { setAllTables, setPrefixKey } = useKeybindingStore();
+  useEffect(() => {
+    fetchKeybindings()
+      .then((data) => {
+        setAllTables(data.tables);
+        if (data.prefixKey) {
+          setPrefixKey(data.prefixKey);
+        }
+      })
+      .catch((err) => console.error('[App] Failed to load keybindings:', err));
+  }, [setAllTables, setPrefixKey]);
 
   // Keybinding action handler
   const handleKeybindingAction = useCallback(
@@ -106,11 +158,20 @@ function App() {
         case 'zoomPane':
           toggleZoom();
           break;
-        case 'newWindow':
-          if (sessionId) {
-            sendMessage({ type: 'createWindow', payload: { sessionId } });
+        case 'newWindow': {
+          const sid = getSessionId();
+          if (sid) {
+            const defaultStartDir = useSettingsStore.getState().defaultStartDir;
+            sendMessage({
+              type: 'createWindow',
+              payload: {
+                sessionId: sid,
+                ...(defaultStartDir ? { cwd: defaultStartDir } : {}),
+              },
+            });
           }
           break;
+        }
         case 'nextWindow': {
           const curIdx = windows.findIndex(w => w.id === activeWindowId);
           if (curIdx !== -1 && windows.length > 0) {
@@ -149,15 +210,32 @@ function App() {
           break;
       }
     },
-    [activePane, layout, panes, sendMessage, sessionId, setActivePane, toggleZoom, windows, activeWindowId, setActiveWindow, copySelection, pasteToPane, sendInput]
+    [activePane, layout, panes, sendMessage, getSessionId, setActivePane, toggleZoom, windows, activeWindowId, setActiveWindow, copySelection, pasteToPane, sendInput]
+  );
+
+  // Handle server-side tmux command execution from keybindings
+  const handleKeybindingCommand = useCallback(
+    (command: string) => {
+      sendMessage({ type: 'executeCommand', payload: { command } });
+    },
+    [sendMessage]
   );
 
   // Initialize keybindings with action handler
   const keybindingOptions: UseKeyBindingsOptions = useMemo(
-    () => ({ onAction: handleKeybindingAction }),
-    [handleKeybindingAction]
+    () => ({
+      onAction: handleKeybindingAction,
+      onCommand: handleKeybindingCommand,
+    }),
+    [handleKeybindingAction, handleKeybindingCommand]
   );
-  useKeyBindings(keybindingOptions);
+  const { handleKeyEvent, prefixMode } = useGlobalKeyBindings(keybindingOptions);
+
+  // Expose the keybinding handler globally so Terminal instances can call it
+  // from attachCustomKeyEventHandler without prop-drilling through 4 layers.
+  // Use synchronous assignment (not useEffect) to avoid gaps where the handler
+  // is null between effect cleanup and re-run.
+  globalThis.webtermKeyHandler = handleKeyEvent;
 
   // Map WebSocket state to ConnectionState
   const connectionState: ConnectionState =
@@ -188,6 +266,18 @@ function App() {
     [sendMessage, setActivePane]
   );
 
+  // Handle pane title change — the backend handles window auto-rename via
+  // the windowRenamed WebSocket message (with smart name extraction), so we
+  // don't update the window name here to avoid overriding it with the raw
+  // terminal title (e.g. "C:\Program Files\PowerShell\7\pwsh.exe").
+  const handlePaneTitleChange = useCallback(
+    (_paneId: string, _title: string) => {
+      // Pane title is already updated by the paneTitleChanged message handler.
+      // Window name is updated by the windowRenamed message handler.
+    },
+    []
+  );
+
   // Window tabs data
   const windowTabs: WindowTab[] = useMemo(
     () =>
@@ -207,10 +297,18 @@ function App() {
   );
 
   const handleNewWindow = useCallback(() => {
-    if (sessionId) {
-      sendMessage({ type: 'createWindow', payload: { sessionId } });
+    const sid = getSessionId();
+    if (sid) {
+      const defaultStartDir = useSettingsStore.getState().defaultStartDir;
+      sendMessage({
+        type: 'createWindow',
+        payload: {
+          sessionId: sid,
+          ...(defaultStartDir ? { cwd: defaultStartDir } : {}),
+        },
+      });
     }
-  }, [sessionId, sendMessage]);
+  }, [getSessionId, sendMessage]);
 
   const handleWindowClose = useCallback(
     (windowId: string) => {
@@ -221,12 +319,13 @@ function App() {
 
   // T003: Save session handler
   const handleSaveSession = useCallback(async (name: string) => {
-    if (!sessionId) return;
+    const sid = getSessionId();
+    if (!sid) return;
     setIsSaving(true);
     setSaveError(null);
     try {
-      await apiUpdateSession(sessionId, { name });
-      await apiSaveSession(sessionId);
+      await apiUpdateSession(sid, { name });
+      await apiSaveSession(sid);
       updateSession({ name });
       setShowSaveDialog(false);
       // Refresh saved sessions list
@@ -237,32 +336,86 @@ function App() {
     } finally {
       setIsSaving(false);
     }
-  }, [sessionId, updateSession, setSavedSessions]);
+  }, [getSessionId, updateSession, setSavedSessions]);
 
   // T012: Session name save from inline edit
   const handleSessionNameSave = useCallback(async (newName: string) => {
-    if (!sessionId) return;
+    const sid = getSessionId();
+    if (!sid) return;
     try {
-      await apiUpdateSession(sessionId, { name: newName });
+      await apiUpdateSession(sid, { name: newName });
       updateSession({ name: newName });
     } catch (err) {
       console.error('[App] Failed to update session name:', err);
     }
-  }, [sessionId, updateSession]);
+  }, [getSessionId, updateSession]);
 
-  // T004: Restore session
+  // Create a new independent session
+  const handleNewSession = useCallback(async () => {
+    try {
+      const session = await apiCreateSession();
+      useSessionStore.getState().resetForSessionSwitch();
+      usePaneStore.getState().resetForSessionSwitch();
+      switchSession(session.id);
+      // Refresh saved sessions list after switch
+      fetchSessions()
+        .then(setSavedSessions)
+        .catch((err) => console.error('[App] Failed to refresh sessions:', err));
+    } catch (err) {
+      console.error('[App] Failed to create new session:', err);
+    }
+  }, [switchSession, setSavedSessions]);
+
+  // T004: Restore/switch to existing session
   const handleRestoreSession = useCallback(async (restoreSessionId: string) => {
     try {
-      const session = await fetchSession(restoreSessionId);
-      // TODO: Switch WebSocket to the restored session
-      console.log('[App] Session restored:', session.id);
+      useSessionStore.getState().resetForSessionSwitch();
+      usePaneStore.getState().resetForSessionSwitch();
+      switchSession(restoreSessionId);
     } catch (err) {
       console.error('[App] Failed to restore session:', err);
     }
-  }, []);
+  }, [switchSession]);
 
-  // Don't render layout until it's loaded
-  if (!layout) {
+  // Handle context menu command from pane right-click
+  const handleContextMenuCommand = useCallback(
+    (paneId: string, command: string) => {
+      switch (command) {
+        case 'split-h':
+          sendMessage({ type: 'split', payload: { paneId, direction: 'h' } });
+          break;
+        case 'split-v':
+          sendMessage({ type: 'split', payload: { paneId, direction: 'v' } });
+          break;
+        case 'close':
+          sendMessage({ type: 'close', payload: { paneId } });
+          break;
+        case 'zoom':
+          toggleZoom(paneId);
+          break;
+        case 'copy':
+          copySelection(paneId).then((result) => {
+            if (result.success) {
+              setClipboardNotification(result.fallback ? 'Copied to in-app clipboard' : 'Copied');
+            }
+          });
+          break;
+        case 'paste':
+          pasteToPane(paneId, sendInput);
+          break;
+        case 'mark':
+          sendMessage({ type: 'executeCommand', payload: { command: 'select-pane -m' } });
+          break;
+        default:
+          sendMessage({ type: 'executeCommand', payload: { command } });
+          break;
+      }
+    },
+    [sendMessage, toggleZoom, copySelection, pasteToPane, sendInput],
+  );
+
+  // Don't render layout until we have at least one window
+  if (windows.length === 0) {
     return (
       <ErrorBoundary>
         <div className="h-screen w-screen flex items-center justify-center bg-background">
@@ -289,20 +442,39 @@ function App() {
           {...(windows.length > 1 ? { onTabClose: handleWindowClose } : {})}
           onNewWindow={handleNewWindow}
         />
-        <main className="flex-1 relative overflow-hidden p-2">
-          <PaneContainer
-            layout={layout}
-            panes={panes}
-            activePaneId={activePane}
-            zoomedPaneId={zoomedPane}
-            onPaneData={handlePaneData}
-            onPaneResize={handlePaneResize}
-            onPaneFocus={handlePaneFocus}
-          />
+        <main className="flex-1 relative overflow-hidden">
+          {windows.map((w) => {
+            const isActive = activeWindowId === w.id;
+            return (
+            <div
+              key={w.id}
+              className="absolute p-2 pb-8"
+              style={{
+                inset: 0,
+                visibility: isActive ? 'visible' : 'hidden',
+                zIndex: isActive ? 1 : 0,
+              }}
+            >
+              <PaneContainer
+                layout={w.layout}
+                panes={w.panes}
+                activePaneId={isActive ? activePane : null}
+                zoomedPaneId={isActive ? zoomedPane : null}
+                onPaneData={handlePaneData}
+                onPaneResize={handlePaneResize}
+                onPaneFocus={handlePaneFocus}
+                onPaneTitleChange={handlePaneTitleChange}
+                onContextMenuCommand={handleContextMenuCommand}
+                prefixActive={prefixMode.active}
+              />
+            </div>
+            );
+          })}
           {connectionState === 'disconnected' && (
             <DisconnectionOverlay isVisible={true} />
           )}
         </main>
+        <StatusBar onSwitchWindow={handleWindowTabClick} />
       </div>
 
       {/* Save Session Dialog */}
@@ -320,7 +492,8 @@ function App() {
         isOpen={showSessionPanel}
         onClose={() => setShowSessionPanel(false)}
         onRestore={handleRestoreSession}
-        onNewSession={handleNewWindow}
+        onNewSession={handleNewSession}
+        currentSessionId={getSessionId() ?? undefined}
       />
 
       {/* Settings Panel */}

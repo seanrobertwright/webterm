@@ -3,8 +3,25 @@
 # ==============================================================================
 FROM node:20-bookworm AS base
 
-# Native module build tools (node-pty, better-sqlite3)
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
+# Common dev tools + native module build tools (node-pty, better-sqlite3)
+RUN apt-get update && apt-get install -y \
+    python3 make g++ \
+    sudo curl wget git vim nano less htop \
+    procps net-tools iputils-ping dnsutils \
+    jq tree tmux ssh openssh-client \
+    zip unzip tar gzip \
+    ca-certificates gnupg gosu \
+  && rm -rf /var/lib/apt/lists/*
+
+# Configure non-root user for terminal sessions
+# (Claude Code refuses --dangerously-skip-permissions as root)
+# node:20-bookworm already ships a 'node' user (uid 1000). Give it sudo + bash.
+RUN usermod -s /bin/bash node \
+  && echo 'node ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Entrypoint fixes volume ownership then drops to non-root user
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app
 
@@ -27,9 +44,13 @@ FROM base AS dev-backend
 COPY backend/src/ backend/src/
 COPY backend/tsconfig.json backend/
 
+# Ensure non-root user owns the app directory and data dir exists
+RUN mkdir -p /app/data /app/backend/data && chown -R node:node /app
+
 ENV HOST=0.0.0.0
 EXPOSE 9174
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["npm", "run", "dev:backend"]
 
 # ==============================================================================
@@ -39,9 +60,12 @@ FROM base AS dev-frontend
 
 COPY frontend/ frontend/
 
+RUN chown -R node:node /app
+
 ENV HOST=0.0.0.0
 EXPOSE 5173
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["npm", "run", "dev:frontend"]
 
 # ==============================================================================
@@ -56,10 +80,24 @@ RUN npm run build
 # ==============================================================================
 # Production target — minimal runtime
 # ==============================================================================
-FROM node:20-bookworm-slim AS prod
+FROM node:20-bookworm AS prod
 
-# Runtime dependencies for native modules
-RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+# Runtime tools
+RUN apt-get update && apt-get install -y \
+    python3 \
+    sudo curl wget git vim nano less htop \
+    procps net-tools iputils-ping dnsutils \
+    jq tree tmux ssh openssh-client \
+    zip unzip tar gzip \
+    ca-certificates gnupg gosu \
+  && rm -rf /var/lib/apt/lists/*
+
+# Configure non-root user (node:20-bookworm ships 'node' user at uid 1000)
+RUN usermod -s /bin/bash node \
+  && echo 'node ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app
 
@@ -78,9 +116,13 @@ COPY --from=build /app/backend/dist/ backend/dist/
 COPY --from=build /app/frontend/dist/ frontend/dist/
 COPY --from=build /app/shared/ shared/
 
+# Own everything
+RUN mkdir -p /app/data /app/backend/data && chown -R node:node /app
+
 ENV HOST=0.0.0.0
 ENV NODE_ENV=production
 
 EXPOSE 9174
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "backend/dist/index.js"]

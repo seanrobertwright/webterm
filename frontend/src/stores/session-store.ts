@@ -57,6 +57,7 @@ export interface SessionActions {
   
   // Reset
   reset: () => void;
+  resetForSessionSwitch: () => void;
 }
 
 export type SessionStore = SessionState & SessionActions;
@@ -225,16 +226,25 @@ export const useSessionStore = create<SessionStore>()(
                 // Verify window exists
                 const windowExists = state.windows.some(w => w.id === windowId);
                 if (!windowExists) return state;
-                
+
+                // Clear monitoring flags on the window being switched to
+                const newWindows = state.windows.map(w =>
+                  w.id === windowId
+                    ? { ...w, activityFlag: false, bellFlag: false, silenceFlag: false }
+                    : w
+                );
+
                 const newSession = state.currentSession
                   ? {
                       ...state.currentSession,
+                      windows: newWindows,
                       activeWindowId: windowId,
                       updatedAt: Date.now(),
                     }
                   : null;
-                
+
                 return {
+                  windows: newWindows,
                   activeWindowId: windowId,
                   currentSession: newSession,
                 };
@@ -306,6 +316,22 @@ export const useSessionStore = create<SessionStore>()(
 
           reset: () => {
             set(initialState, false, 'reset');
+          },
+
+          resetForSessionSwitch: () => {
+            set(
+              (state) => ({
+                currentSession: null,
+                windows: [],
+                activeWindowId: null,
+                error: null,
+                // Preserve savedSessions and isLoading
+                savedSessions: state.savedSessions,
+                isLoading: state.isLoading,
+              }),
+              false,
+              'resetForSessionSwitch'
+            );
           },
         }),
         {

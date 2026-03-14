@@ -155,6 +155,9 @@ export async function handleCreate(
       connectionState: 'connected',
       exitCode: null,
       createdAt: Date.now(),
+      title: '',
+      marked: false,
+      currentCommand: null,
     };
 
     // If we have an existing layout with a focused pane, split it vertically
@@ -299,6 +302,9 @@ export async function handleSplit(
       connectionState: 'connected',
       exitCode: null,
       createdAt: Date.now(),
+      title: '',
+      marked: false,
+      currentCommand: null,
     };
 
     // Persist layout to DB

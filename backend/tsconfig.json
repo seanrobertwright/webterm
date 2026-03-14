@@ -26,6 +26,6 @@
       "@webterm/shared/*": ["shared/types/*"]
     }
   },
-  "include": ["src/**/*", "../shared/types/**/*"],
+  "include": ["src/**/*", "../shared/types/**/*", "../shared/tmux/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
 }

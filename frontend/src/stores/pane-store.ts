@@ -64,6 +64,7 @@ export interface PaneActions {
   // Bulk operations
   setInitialState: (windowId: string, layout: Layout, panes: Pane[]) => void;
   reset: () => void;
+  resetForSessionSwitch: () => void;
 }
 
 export type PaneStore = PaneState & PaneActions;
@@ -376,6 +377,10 @@ export const usePaneStore = create<PaneStore>()(
 
       reset: () => {
         set(initialState, false, 'reset');
+      },
+
+      resetForSessionSwitch: () => {
+        set(initialState, false, 'resetForSessionSwitch');
       },
     })),
     { name: 'pane-store' }

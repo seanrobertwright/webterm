@@ -4,21 +4,21 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { sendJson, sendError } from '../rest-router.js';
+import { sendJson } from '../rest-router.js';
 import { logger } from '../../utils/logger.js';
 import {
   NotFoundError,
   ValidationError,
   DuplicateError,
-  toErrorResponse,
 } from '../../utils/errors.js';
-import { randomUUID } from 'node:crypto';
 import type {
   Session,
   SessionWithWindows,
+  SessionExport,
   SessionListItem,
   WindowWithPanes,
 } from '@webterm/shared/models';
+import { sessionService } from '../../services/session-service.js';
 
 // ============================================================================
 // In-Memory Session Store (placeholder until database is implemented)
@@ -31,32 +31,6 @@ interface SessionStore {
 const store: SessionStore = {
   sessions: new Map(),
 };
-
-/**
- * Get session by ID
- */
-function getSessionById(id: string): SessionWithWindows | undefined {
-  return store.sessions.get(id);
-}
-
-/**
- * Get session by name
- */
-function getSessionByName(name: string): SessionWithWindows | undefined {
-  for (const session of store.sessions.values()) {
-    if (session.name === name) {
-      return session;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Count panes in a session
- */
-function countPanes(session: SessionWithWindows): number {
-  return session.windows.reduce((count, window) => count + window.panes.length, 0);
-}
 
 // ============================================================================
 // Route Handlers
@@ -74,18 +48,7 @@ export async function handleListSessions(
 ): Promise<void> {
   logger.debug('Listing sessions');
 
-  const sessions: SessionListItem[] = [];
-
-  for (const session of store.sessions.values()) {
-    sessions.push({
-      id: session.id,
-      name: session.name,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      windowCount: session.windows.length,
-      paneCount: countPanes(session),
-    });
-  }
+  const sessions = sessionService.getAllSessions();
 
   // Sort by updatedAt descending
   sessions.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -107,7 +70,7 @@ export async function handleGetSession(
 
   logger.debug('Getting session', { id });
 
-  const session = getSessionById(id);
+  const session = sessionService.getSession(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
@@ -144,34 +107,23 @@ export async function handleCreateSession(
   }
 
   // Check for duplicate name
-  if (getSessionByName(name)) {
+  if (sessionService.sessionNameExists(name)) {
     throw new DuplicateError('Session', 'name', name);
   }
 
-  // Create session
-  const id = randomUUID();
-  const now = Date.now();
+  // Create session via service (persists to SQLite)
+  const session = sessionService.createSession({ name });
 
-  const session: SessionWithWindows = {
-    id,
-    name,
-    createdAt: now,
-    updatedAt: now,
-    activeWindowId: null,
-    windows: [],
-  };
+  logger.info('Session created', { id: session.id, name: session.name });
 
-  store.sessions.set(id, session);
-
-  logger.info('Session created', { id, name });
-
-  // Return created session (without windows for creation response)
+  // Return created session
   const response: Session = {
     id: session.id,
     name: session.name,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     activeWindowId: session.activeWindowId,
+    lastWindowId: session.lastWindowId ?? null,
   };
 
   sendJson(res, 201, response);
@@ -191,7 +143,7 @@ export async function handleUpdateSession(
 
   logger.debug('Updating session', { id, body });
 
-  const session = getSessionById(id);
+  const session = sessionService.getSession(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
@@ -211,28 +163,102 @@ export async function handleUpdateSession(
     }
 
     // Check for duplicate name (excluding current session)
-    const existingSession = getSessionByName(name);
-    if (existingSession && existingSession.id !== id) {
+    if (sessionService.sessionNameExists(name, id)) {
       throw new DuplicateError('Session', 'name', name);
     }
 
-    session.name = name;
+    sessionService.updateSession(id, { name });
   }
 
-  session.updatedAt = Date.now();
+  logger.info('Session updated', { id, name });
 
-  logger.info('Session updated', { id, name: session.name });
+  // Re-fetch updated session
+  const updated = sessionService.getSession(id);
+  if (!updated) {
+    throw new NotFoundError('Session', id);
+  }
 
-  // Return updated session summary
   const response: Session = {
-    id: session.id,
-    name: session.name,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    activeWindowId: session.activeWindowId,
+    id: updated.id,
+    name: updated.name,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+    activeWindowId: updated.activeWindowId,
+    lastWindowId: updated.lastWindowId ?? null,
   };
 
   sendJson(res, 200, response);
+}
+
+/**
+ * DELETE /api/v1/sessions
+ * Clear all sessions except the active one
+ */
+export async function handleClearAllSessions(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  body: unknown
+): Promise<void> {
+  logger.debug('Clearing all sessions', { body });
+
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Request body is required', 'body', 'required');
+  }
+
+  const { keepSessionId } = body as { keepSessionId?: string };
+
+  if (!keepSessionId || typeof keepSessionId !== 'string') {
+    throw new ValidationError('keepSessionId is required', 'keepSessionId', 'required');
+  }
+
+  const deleted = sessionService.deleteAllSessions(keepSessionId);
+
+  logger.info('All sessions cleared', { keepSessionId, deleted });
+
+  sendJson(res, 200, { deleted });
+}
+
+/**
+ * POST /api/v1/sessions/import
+ * Import a session from an export JSON payload
+ */
+export async function handleImportSession(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  _params: Record<string, string>,
+  body: unknown
+): Promise<void> {
+  logger.debug('Importing session', { body: typeof body });
+
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Request body is required', 'body', 'required');
+  }
+
+  const data = body as Record<string, unknown>;
+
+  if (data['version'] !== 1) {
+    throw new ValidationError('Unsupported export version (expected 1)', 'version', 'invalid');
+  }
+
+  const session = data['session'] as Record<string, unknown> | undefined;
+  if (!session || typeof session !== 'object') {
+    throw new ValidationError('session object is required', 'session', 'required');
+  }
+
+  if (!session['name'] || typeof session['name'] !== 'string') {
+    throw new ValidationError('session.name is required', 'session.name', 'required');
+  }
+
+  if (!Array.isArray(session['windows']) || session['windows'].length === 0) {
+    throw new ValidationError('session.windows must be a non-empty array', 'session.windows', 'required');
+  }
+
+  const result = sessionService.importSession(body as SessionExport);
+
+  logger.info('Session imported', { id: result.session.id, name: result.session.name });
+
+  sendJson(res, 201, result);
 }
 
 /**
@@ -249,20 +275,14 @@ export async function handleDeleteSession(
 
   logger.debug('Deleting session', { id });
 
-  const session = getSessionById(id);
+  const session = sessionService.getSession(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  // TODO: Close all panes and windows first
-  // for (const window of session.windows) {
-  //   for (const pane of window.panes) {
-  //     await ptyService.closePane(pane.id);
-  //   }
-  // }
-
-  store.sessions.delete(id);
+  // sessionService.deleteSession kills all PTYs and cascade-deletes from SQLite
+  sessionService.deleteSession(id);
 
   logger.info('Session deleted', { id });
 
@@ -284,28 +304,29 @@ export async function handleSaveSession(
 
   logger.debug('Saving session', { id });
 
-  const session = getSessionById(id);
+  const session = sessionService.getSession(id);
 
   if (!session) {
     throw new NotFoundError('Session', id);
   }
 
-  // Update timestamp
-  session.updatedAt = Date.now();
-
-  // TODO: Persist session state to database
-  // await database.saveSession(session);
+  sessionService.saveSession(id);
 
   logger.info('Session saved', { id });
 
-  // Return session summary
+  // Re-fetch to get updated timestamp
+  const saved = sessionService.getSession(id);
+  if (!saved) {
+    throw new NotFoundError('Session', id);
+  }
+
   const response: SessionListItem = {
-    id: session.id,
-    name: session.name,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    windowCount: session.windows.length,
-    paneCount: countPanes(session),
+    id: saved.id,
+    name: saved.name,
+    createdAt: saved.createdAt,
+    updatedAt: saved.updatedAt,
+    windowCount: saved.windows.length,
+    paneCount: saved.windows.reduce((count, w) => count + w.panes.length, 0),
   };
 
   sendJson(res, 200, response);

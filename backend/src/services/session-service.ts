@@ -8,15 +8,16 @@ import { getDatabase, transaction } from '../db/database.js';
 import { ptyManager } from './pty-service.js';
 import { createLeafLayout, serializeLayout, parseLayout } from './layout-service.js';
 import { logger } from '../utils/logger.js';
-import type { 
-  Session, 
-  SessionWithWindows, 
-  Window, 
-  WindowWithPanes, 
-  Pane, 
+import type {
+  Session,
+  SessionWithWindows,
+  SessionExport,
+  Window,
+  WindowWithPanes,
+  Pane,
   Layout,
   SessionListItem,
-  ShellType 
+  ShellType
 } from '../../../shared/types/models.js';
 
 /** Session creation options */
@@ -33,6 +34,7 @@ interface SessionRow {
   created_at: number;
   updated_at: number;
   active_window_id: string | null;
+  last_window_id: string | null;
 }
 
 interface WindowRow {
@@ -42,6 +44,11 @@ interface WindowRow {
   idx: number;
   layout: string;
   created_at: number;
+  auto_rename: number;
+  last_active_at: number | null;
+  monitor_activity: number;
+  monitor_silence: number;
+  monitor_bell: number;
 }
 
 interface PaneRow {
@@ -54,6 +61,8 @@ interface PaneRow {
   connection_state: string;
   exit_code: number | null;
   created_at: number;
+  title: string;
+  marked: number;
 }
 
 /**
@@ -71,10 +80,12 @@ export class SessionService {
 
     // Ensure unique name — append counter if name already exists
     let name = requestedName;
-    const existing = db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name = ?').get(name) as { count: number };
-    if (existing.count > 0) {
-      const total = db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name LIKE ?').get(`${requestedName}%`) as { count: number };
-      name = `${requestedName} ${total.count + 1}`;
+    let suffix = 1;
+    while (
+      (db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name = ?').get(name) as { count: number }).count > 0
+    ) {
+      suffix++;
+      name = `${requestedName} ${suffix}`;
     }
 
     const sessionId = uuidv4();
@@ -118,6 +129,9 @@ export class SessionService {
         connectionState: 'disconnected',
         exitCode: null,
         createdAt: now,
+        title: '',
+        marked: false,
+        currentCommand: null,
       };
 
       const window: WindowWithPanes = {
@@ -128,6 +142,14 @@ export class SessionService {
         layout: initialLayout,
         panes: [pane],
         createdAt: now,
+        autoRename: true,
+        lastActiveAt: now,
+        monitorActivity: false,
+        monitorSilence: 0,
+        monitorBell: true,
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
 
       const session: SessionWithWindows = {
@@ -136,6 +158,7 @@ export class SessionService {
         createdAt: now,
         updatedAt: now,
         activeWindowId: windowId,
+        lastWindowId: null,
         windows: [window],
       };
 
@@ -150,7 +173,7 @@ export class SessionService {
     const db = getDatabase();
 
     const sessionRow = db.prepare(`
-      SELECT id, name, created_at, updated_at, active_window_id
+      SELECT id, name, created_at, updated_at, active_window_id, last_window_id
       FROM sessions WHERE id = ?
     `).get(id) as SessionRow | undefined;
 
@@ -159,13 +182,15 @@ export class SessionService {
     }
 
     const windowRows = db.prepare(`
-      SELECT id, session_id, name, idx, layout, created_at
+      SELECT id, session_id, name, idx, layout, created_at,
+             auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
       FROM windows WHERE session_id = ? ORDER BY idx
     `).all(id) as WindowRow[];
 
     const windows: WindowWithPanes[] = windowRows.map((windowRow) => {
       const paneRows = db.prepare(`
-        SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at
+        SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+               title, marked
         FROM panes WHERE window_id = ?
       `).all(windowRow.id) as PaneRow[];
 
@@ -179,6 +204,9 @@ export class SessionService {
         connectionState: paneRow.connection_state as Pane['connectionState'],
         exitCode: paneRow.exit_code,
         createdAt: paneRow.created_at,
+        title: paneRow.title ?? '',
+        marked: Boolean(paneRow.marked),
+        currentCommand: null,
       }));
 
       return {
@@ -189,6 +217,14 @@ export class SessionService {
         layout: parseLayout(windowRow.layout) ?? createLeafLayout(panes[0]?.id ?? ''),
         panes,
         createdAt: windowRow.created_at,
+        autoRename: Boolean(windowRow.auto_rename ?? 1),
+        lastActiveAt: windowRow.last_active_at ?? null,
+        monitorActivity: Boolean(windowRow.monitor_activity),
+        monitorSilence: windowRow.monitor_silence ?? 0,
+        monitorBell: Boolean(windowRow.monitor_bell ?? 1),
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
     });
 
@@ -198,6 +234,7 @@ export class SessionService {
       createdAt: sessionRow.created_at,
       updatedAt: sessionRow.updated_at,
       activeWindowId: sessionRow.active_window_id,
+      lastWindowId: sessionRow.last_window_id ?? null,
       windows,
     };
   }
@@ -295,6 +332,181 @@ export class SessionService {
   }
 
   /**
+   * Delete all sessions except the one with the given ID.
+   * Kills all PTYs for deleted sessions and cascade-deletes from SQLite.
+   * Returns the number of deleted sessions.
+   */
+  deleteAllSessions(excludeId: string): number {
+    const db = getDatabase();
+
+    // Get all sessions except the excluded one
+    const sessionRows = db.prepare(
+      'SELECT id FROM sessions WHERE id != ?'
+    ).all(excludeId) as Array<{ id: string }>;
+
+    if (sessionRows.length === 0) {
+      return 0;
+    }
+
+    // Kill PTYs for all panes in sessions being deleted
+    for (const row of sessionRows) {
+      const session = this.getSession(row.id);
+      if (session) {
+        for (const window of session.windows) {
+          for (const pane of window.panes) {
+            if (ptyManager.hasPty(pane.id)) {
+              ptyManager.kill(pane.id);
+            }
+          }
+        }
+      }
+    }
+
+    logger.info(`Deleting all sessions except: ${excludeId} (${sessionRows.length} to delete)`);
+
+    // Delete all sessions except the excluded one (CASCADE handles windows/panes)
+    const result = db.prepare('DELETE FROM sessions WHERE id != ?').run(excludeId);
+    return result.changes;
+  }
+
+  /**
+   * Import a session from an export payload.
+   * Creates a new session with the exported structure (windows, panes, layout).
+   * Returns the created session and a mapping of old pane IDs to new pane IDs
+   * so the frontend can replay scrollback to the correct terminals.
+   */
+  importSession(data: SessionExport): { session: SessionWithWindows; paneIdMap: Record<string, string> } {
+    const db = getDatabase();
+    const now = Date.now();
+    const paneIdMap: Record<string, string> = {};
+
+    // Ensure unique name — reuse the same dedup logic as createSession
+    let name = data.session.name;
+    let suffix = 1;
+    while (
+      (db.prepare('SELECT COUNT(*) as count FROM sessions WHERE name = ?').get(name) as { count: number }).count > 0
+    ) {
+      suffix++;
+      name = `${data.session.name} ${suffix}`;
+    }
+
+    const sessionId = uuidv4();
+
+    return transaction(() => {
+      // Create session shell (no active window yet)
+      db.prepare(`
+        INSERT INTO sessions (id, name, created_at, updated_at, active_window_id)
+        VALUES (?, ?, ?, ?, NULL)
+      `).run(sessionId, name, now, now);
+
+      let firstWindowId: string | null = null;
+      const allWindows: WindowWithPanes[] = [];
+
+      for (const exportWindow of data.session.windows) {
+        const windowId = uuidv4();
+        if (firstWindowId === null) {
+          firstWindowId = windowId;
+        }
+
+        // Create panes and build ID mapping
+        const newPanes: Pane[] = [];
+        for (const exportPane of exportWindow.panes) {
+          const newPaneId = uuidv4();
+          paneIdMap[exportPane.id] = newPaneId;
+
+          db.prepare(`
+            INSERT INTO panes (id, window_id, shell, cwd, cols, rows, connection_state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(newPaneId, windowId, exportPane.shell, exportPane.cwd ?? null, exportPane.cols, exportPane.rows, 'disconnected', now);
+
+          newPanes.push({
+            id: newPaneId,
+            windowId,
+            shell: exportPane.shell,
+            cwd: exportPane.cwd,
+            cols: exportPane.cols,
+            rows: exportPane.rows,
+            connectionState: 'disconnected',
+            exitCode: null,
+            createdAt: now,
+            title: exportPane.title ?? '',
+            marked: false,
+            currentCommand: null,
+          });
+        }
+
+        // Remap pane IDs in the layout tree
+        const remappedLayout = this.remapLayoutPaneIds(exportWindow.layout, paneIdMap);
+
+        db.prepare(`
+          INSERT INTO windows (id, session_id, name, idx, layout, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(windowId, sessionId, exportWindow.name, exportWindow.index, serializeLayout(remappedLayout), now);
+
+        allWindows.push({
+          id: windowId,
+          sessionId,
+          name: exportWindow.name,
+          index: exportWindow.index,
+          layout: remappedLayout,
+          panes: newPanes,
+          createdAt: now,
+          autoRename: true,
+          lastActiveAt: now,
+          monitorActivity: false,
+          monitorSilence: 0,
+          monitorBell: true,
+          activityFlag: false,
+          bellFlag: false,
+          silenceFlag: false,
+        });
+      }
+
+      // Set active window to the first one
+      if (firstWindowId) {
+        db.prepare('UPDATE sessions SET active_window_id = ? WHERE id = ?').run(firstWindowId, sessionId);
+      }
+
+      const session: SessionWithWindows = {
+        id: sessionId,
+        name,
+        createdAt: now,
+        updatedAt: now,
+        activeWindowId: firstWindowId,
+        lastWindowId: null,
+        windows: allWindows,
+      };
+
+      return { session, paneIdMap };
+    });
+  }
+
+  /**
+   * Recursively remap pane IDs in a layout tree using the given ID mapping.
+   */
+  private remapLayoutPaneIds(layout: Layout, paneIdMap: Record<string, string>): Layout {
+    if (layout.type === 'leaf' && layout.paneId) {
+      return {
+        type: 'leaf',
+        paneId: paneIdMap[layout.paneId] ?? layout.paneId,
+      };
+    }
+
+    if (layout.children) {
+      const remapped: Layout = {
+        type: layout.type,
+        children: layout.children.map((child) => this.remapLayoutPaneIds(child, paneIdMap)),
+      };
+      if (layout.sizes) {
+        remapped.sizes = [...layout.sizes];
+      }
+      return remapped;
+    }
+
+    return { ...layout };
+  }
+
+  /**
    * Save current session state (layout) to database
    */
   saveSession(id: string): boolean {
@@ -360,6 +572,17 @@ export class SessionService {
   }
 
   /**
+   * Update a pane's title
+   */
+  updatePaneTitle(paneId: string, title: string): boolean {
+    const db = getDatabase();
+    const result = db.prepare(`
+      UPDATE panes SET title = ? WHERE id = ?
+    `).run(title, paneId);
+    return result.changes > 0;
+  }
+
+  /**
    * Create a new window in a session
    */
   createWindow(sessionId: string, name: string, shell: ShellType = 'default', cwd?: string): WindowWithPanes | null {
@@ -406,6 +629,9 @@ export class SessionService {
         connectionState: 'disconnected',
         exitCode: null,
         createdAt: now,
+        title: '',
+        marked: false,
+        currentCommand: null,
       };
 
       return {
@@ -416,6 +642,14 @@ export class SessionService {
         layout,
         panes: [pane],
         createdAt: now,
+        autoRename: true,
+        lastActiveAt: now,
+        monitorActivity: false,
+        monitorSilence: 0,
+        monitorBell: true,
+        activityFlag: false,
+        bellFlag: false,
+        silenceFlag: false,
       };
     });
   }
@@ -479,6 +713,9 @@ export class SessionService {
       connectionState: 'disconnected',
       exitCode: null,
       createdAt: now,
+      title: '',
+      marked: false,
+      currentCommand: null,
     };
   }
 
@@ -506,7 +743,8 @@ export class SessionService {
     const db = getDatabase();
 
     const row = db.prepare(`
-      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at
+      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+             title, marked
       FROM panes WHERE id = ?
     `).get(paneId) as PaneRow | undefined;
 
@@ -524,6 +762,9 @@ export class SessionService {
       connectionState: row.connection_state as Pane['connectionState'],
       exitCode: row.exit_code,
       createdAt: row.created_at,
+      title: row.title ?? '',
+      marked: Boolean(row.marked),
+      currentCommand: null,
     };
   }
 
@@ -538,6 +779,149 @@ export class SessionService {
     `).run(cols, rows, paneId);
 
     return result.changes > 0;
+  }
+
+  /**
+   * Get a window by ID with layout and panes
+   */
+  getWindow(windowId: string): WindowWithPanes | null {
+    const db = getDatabase();
+
+    const windowRow = db.prepare(`
+      SELECT id, session_id, name, idx, layout, created_at,
+             auto_rename, last_active_at, monitor_activity, monitor_silence, monitor_bell
+      FROM windows WHERE id = ?
+    `).get(windowId) as WindowRow | undefined;
+
+    if (!windowRow) {
+      return null;
+    }
+
+    const paneRows = db.prepare(`
+      SELECT id, window_id, shell, cwd, cols, rows, connection_state, exit_code, created_at,
+             title, marked
+      FROM panes WHERE window_id = ?
+    `).all(windowId) as PaneRow[];
+
+    const panes: Pane[] = paneRows.map((paneRow) => ({
+      id: paneRow.id,
+      windowId: paneRow.window_id,
+      shell: paneRow.shell as ShellType,
+      cwd: paneRow.cwd,
+      cols: paneRow.cols,
+      rows: paneRow.rows,
+      connectionState: paneRow.connection_state as Pane['connectionState'],
+      exitCode: paneRow.exit_code,
+      createdAt: paneRow.created_at,
+      title: paneRow.title ?? '',
+      marked: Boolean(paneRow.marked),
+      currentCommand: null,
+    }));
+
+    return {
+      id: windowRow.id,
+      sessionId: windowRow.session_id,
+      name: windowRow.name,
+      index: windowRow.idx,
+      layout: parseLayout(windowRow.layout) ?? createLeafLayout(panes[0]?.id ?? ''),
+      panes,
+      createdAt: windowRow.created_at,
+      autoRename: Boolean(windowRow.auto_rename ?? 1),
+      lastActiveAt: windowRow.last_active_at ?? null,
+      monitorActivity: Boolean(windowRow.monitor_activity),
+      monitorSilence: windowRow.monitor_silence ?? 0,
+      monitorBell: Boolean(windowRow.monitor_bell ?? 1),
+      activityFlag: false,
+      bellFlag: false,
+      silenceFlag: false,
+    };
+  }
+
+  /**
+   * Update pane marked status
+   */
+  updatePaneMarked(paneId: string, marked: boolean): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE panes SET marked = ? WHERE id = ?
+    `).run(marked ? 1 : 0, paneId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Move a pane record to a different window (update its window_id in the DB)
+   */
+  movePaneToWindow(paneId: string, targetWindowId: string): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE panes SET window_id = ? WHERE id = ?
+    `).run(targetWindowId, paneId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Rename a window
+   */
+  renameWindow(windowId: string, name: string): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE windows SET name = ? WHERE id = ?
+    `).run(name, windowId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Swap the indices of two windows
+   */
+  swapWindowIndices(windowId1: string, windowId2: string): boolean {
+    const db = getDatabase();
+
+    const row1 = db.prepare('SELECT idx FROM windows WHERE id = ?').get(windowId1) as { idx: number } | undefined;
+    const row2 = db.prepare('SELECT idx FROM windows WHERE id = ?').get(windowId2) as { idx: number } | undefined;
+
+    if (!row1 || !row2) {
+      return false;
+    }
+
+    return transaction(() => {
+      // Use a temporary index to avoid unique constraint conflicts
+      db.prepare('UPDATE windows SET idx = -1 WHERE id = ?').run(windowId1);
+      db.prepare('UPDATE windows SET idx = ? WHERE id = ?').run(row1.idx, windowId2);
+      db.prepare('UPDATE windows SET idx = ? WHERE id = ?').run(row2.idx, windowId1);
+      return true;
+    });
+  }
+
+  /**
+   * Move a window to a specific index position
+   */
+  moveWindowToIndex(windowId: string, targetIndex: number): boolean {
+    const db = getDatabase();
+
+    const result = db.prepare(`
+      UPDATE windows SET idx = ? WHERE id = ?
+    `).run(targetIndex, windowId);
+
+    return result.changes > 0;
+  }
+
+  /**
+   * Update the last-window tracking for a session.
+   * Should be called when switching away from a window so that
+   * `last-window` can switch back to it.
+   */
+  updateLastWindow(sessionId: string, windowId: string): void {
+    const db = getDatabase();
+
+    db.prepare(`
+      UPDATE sessions SET last_window_id = ?, updated_at = ? WHERE id = ?
+    `).run(windowId, Date.now(), sessionId);
   }
 
   /**

@@ -1,0 +1,280 @@
+/* ============================================
+   thegridcn Theme System
+   Tron-inspired themes using oklch() color space
+   Based on: https://github.com/educlopez/thegridcn-ui
+   ============================================ */
+
+/* ============================================
+   THEME: TRON (User) - CYAN
+   Default theme - Classic Tron aesthetic
+   ============================================ */
+:root,
+[data-theme="tron"] {
+  /* Core Tron dark backgrounds - deep black with slight blue tint */
+  --background: oklch(0.06 0.02 250);
+  --foreground: oklch(0.75 0.18 195);
+
+  /* Tron Cyan - Primary accent color */
+  --primary: oklch(0.75 0.18 195);
+  --primary-foreground: oklch(0.1 0 0);
+
+  /* Cards & Popovers */
+  --card: oklch(0.1 0.02 250);
+  --card-foreground: oklch(0.75 0.18 195);
+  --popover: oklch(0.1 0.02 250);
+  --popover-foreground: oklch(0.75 0.18 195);
+
+  /* Secondary */
+  --secondary: oklch(0.18 0.05 200);
+  --secondary-foreground: oklch(0.75 0.18 195);
+
+  /* Muted */
+  --muted: oklch(0.15 0.03 200);
+  --muted-foreground: oklch(0.6 0.06 195);
+
+  /* Accent */
+  --accent: oklch(0.7 0.15 195);
+  --accent-foreground: oklch(0.1 0 0);
+
+  /* Destructive */
+  --destructive: oklch(0.55 0.25 30);
+  --destructive-foreground: oklch(0.98 0 0);
+
+  /* Borders with cyan glow */
+  --border: oklch(0.35 0.14 195);
+  --input: oklch(0.2 0.06 195);
+  --ring: oklch(0.75 0.18 195);
+
+  /* Glow effects - Cyan */
+  --glow: oklch(0.75 0.18 195);
+  --glow-muted: oklch(0.5 0.12 195);
+
+  /* Terminal specific */
+  --terminal-bg: oklch(0.08 0.01 250);
+  --terminal-fg: oklch(0.75 0.18 195);
+  --terminal-cursor: oklch(0.75 0.18 195);
+  --terminal-selection: oklch(0.75 0.18 195 / 0.3);
+  --pane-border: oklch(0.2 0.03 250);
+  --pane-border-focus: oklch(0.75 0.18 195);
+}
+
+/* ============================================
+   THEME: ARES (God of War) - RED
+   ============================================ */
+[data-theme="ares"] {
+  --foreground: oklch(0.6 0.25 25);
+  --card-foreground: oklch(0.6 0.25 25);
+  --popover-foreground: oklch(0.6 0.25 25);
+
+  --primary: oklch(0.6 0.25 25);
+  --primary-foreground: oklch(0.98 0 0);
+
+  --secondary: oklch(0.18 0.06 25);
+  --secondary-foreground: oklch(0.6 0.25 25);
+
+  --muted: oklch(0.15 0.02 250);
+  --muted-foreground: oklch(0.6 0.06 25);
+
+  --accent: oklch(0.7 0.2 50);
+  --accent-foreground: oklch(0.1 0 0);
+
+  --border: oklch(0.35 0.14 25);
+  --input: oklch(0.15 0.04 250);
+  --ring: oklch(0.6 0.25 25);
+
+  --glow: oklch(0.6 0.25 25);
+  --glow-muted: oklch(0.4 0.15 25);
+
+  --terminal-fg: oklch(0.6 0.25 25);
+  --terminal-cursor: oklch(0.6 0.25 25);
+  --terminal-selection: oklch(0.6 0.25 25 / 0.3);
+  --pane-border-focus: oklch(0.6 0.25 25);
+}
+
+/* ============================================
+   THEME: CLU (Program) - ORANGE
+   ============================================ */
+[data-theme="clu"] {
+  --foreground: oklch(0.75 0.2 55);
+  --card-foreground: oklch(0.75 0.2 55);
+  --popover-foreground: oklch(0.75 0.2 55);
+
+  --primary: oklch(0.75 0.2 55);
+  --primary-foreground: oklch(0.1 0 0);
+
+  --secondary: oklch(0.18 0.06 50);
+  --secondary-foreground: oklch(0.75 0.2 55);
+
+  --muted: oklch(0.15 0.04 50);
+  --muted-foreground: oklch(0.6 0.06 55);
+
+  --accent: oklch(0.7 0.18 55);
+  --accent-foreground: oklch(0.1 0 0);
+
+  --border: oklch(0.35 0.14 55);
+  --input: oklch(0.2 0.06 55);
+  --ring: oklch(0.75 0.2 55);
+
+  --glow: oklch(0.75 0.2 55);
+  --glow-muted: oklch(0.5 0.12 55);
+
+  --terminal-fg: oklch(0.75 0.2 55);
+  --terminal-cursor: oklch(0.75 0.2 55);
+  --terminal-selection: oklch(0.75 0.2 55 / 0.3);
+  --pane-border-focus: oklch(0.75 0.2 55);
+}
+
+/* ============================================
+   THEME: ATHENA (Goddess of Wisdom) - YELLOW/GOLD
+   ============================================ */
+[data-theme="athena"] {
+  --foreground: oklch(0.85 0.18 90);
+  --card-foreground: oklch(0.85 0.18 90);
+  --popover-foreground: oklch(0.85 0.18 90);
+
+  --primary: oklch(0.85 0.18 90);
+  --primary-foreground: oklch(0.1 0 0);
+
+  --secondary: oklch(0.18 0.05 85);
+  --secondary-foreground: oklch(0.85 0.18 90);
+
+  --muted: oklch(0.15 0.03 85);
+  --muted-foreground: oklch(0.6 0.06 90);
+
+  --accent: oklch(0.8 0.15 90);
+  --accent-foreground: oklch(0.1 0 0);
+
+  --border: oklch(0.35 0.14 90);
+  --input: oklch(0.2 0.06 90);
+  --ring: oklch(0.85 0.18 90);
+
+  --glow: oklch(0.85 0.18 90);
+  --glow-muted: oklch(0.55 0.12 90);
+
+  --terminal-fg: oklch(0.85 0.18 90);
+  --terminal-cursor: oklch(0.85 0.18 90);
+  --terminal-selection: oklch(0.85 0.18 90 / 0.3);
+  --pane-border-focus: oklch(0.85 0.18 90);
+}
+
+/* ============================================
+   THEME: APHRODITE (Goddess of Love) - PINK/MAGENTA
+   ============================================ */
+[data-theme="aphrodite"] {
+  --foreground: oklch(0.7 0.22 340);
+  --card-foreground: oklch(0.7 0.22 340);
+  --popover-foreground: oklch(0.7 0.22 340);
+
+  --primary: oklch(0.7 0.22 340);
+  --primary-foreground: oklch(0.98 0 0);
+
+  --secondary: oklch(0.18 0.06 340);
+  --secondary-foreground: oklch(0.7 0.22 340);
+
+  --muted: oklch(0.15 0.04 340);
+  --muted-foreground: oklch(0.6 0.06 340);
+
+  --accent: oklch(0.65 0.2 340);
+  --accent-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.35 0.14 340);
+  --input: oklch(0.2 0.06 340);
+  --ring: oklch(0.7 0.22 340);
+
+  --glow: oklch(0.7 0.22 340);
+  --glow-muted: oklch(0.5 0.15 340);
+
+  --terminal-fg: oklch(0.7 0.22 340);
+  --terminal-cursor: oklch(0.7 0.22 340);
+  --terminal-selection: oklch(0.7 0.22 340 / 0.3);
+  --pane-border-focus: oklch(0.7 0.22 340);
+}
+
+/* ============================================
+   THEME: POSEIDON (God of Sea) - DEEP BLUE
+   ============================================ */
+[data-theme="poseidon"] {
+  --foreground: oklch(0.6 0.2 250);
+  --card-foreground: oklch(0.6 0.2 250);
+  --popover-foreground: oklch(0.6 0.2 250);
+
+  --primary: oklch(0.6 0.2 250);
+  --primary-foreground: oklch(0.98 0 0);
+
+  --secondary: oklch(0.18 0.06 250);
+  --secondary-foreground: oklch(0.6 0.2 250);
+
+  --muted: oklch(0.15 0.04 250);
+  --muted-foreground: oklch(0.6 0.06 250);
+
+  --accent: oklch(0.55 0.18 250);
+  --accent-foreground: oklch(0.98 0 0);
+
+  --border: oklch(0.35 0.14 250);
+  --input: oklch(0.2 0.06 250);
+  --ring: oklch(0.6 0.2 250);
+
+  --glow: oklch(0.6 0.2 250);
+  --glow-muted: oklch(0.4 0.12 250);
+
+  --terminal-fg: oklch(0.6 0.2 250);
+  --terminal-cursor: oklch(0.6 0.2 250);
+  --terminal-selection: oklch(0.6 0.2 250 / 0.3);
+  --pane-border-focus: oklch(0.6 0.2 250);
+}
+
+/* ============================================
+   GLOW UTILITIES
+   ============================================ */
+.glow {
+  box-shadow:
+    0 0 5px var(--glow),
+    0 0 10px var(--glow-muted),
+    0 0 20px var(--glow-muted);
+}
+
+.glow-sm {
+  box-shadow:
+    0 0 3px var(--glow),
+    0 0 6px var(--glow-muted);
+}
+
+.glow-lg {
+  box-shadow:
+    0 0 10px var(--glow),
+    0 0 20px var(--glow-muted),
+    0 0 40px var(--glow-muted),
+    0 0 60px var(--glow-muted);
+}
+
+.glow-text {
+  text-shadow:
+    0 0 5px var(--glow),
+    0 0 10px var(--glow-muted),
+    0 0 20px var(--glow-muted);
+}
+
+.glow-border {
+  border-color: var(--glow);
+  box-shadow:
+    0 0 5px var(--glow),
+    inset 0 0 5px var(--glow-muted);
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 5px var(--glow),
+      0 0 10px var(--glow-muted);
+  }
+  50% {
+    box-shadow:
+      0 0 10px var(--glow),
+      0 0 20px var(--glow),
+      0 0 30px var(--glow-muted);
+  }
+}

@@ -2,7 +2,8 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
-const backendUrl = `http://${process.env.BACKEND_HOST ?? 'localhost'}:9174`;
+const backendHost = process.env.BACKEND_HOST ?? 'localhost';
+const backendUrl = `http://${backendHost}:9174`;
 
 export default defineConfig({
   plugins: [react()],

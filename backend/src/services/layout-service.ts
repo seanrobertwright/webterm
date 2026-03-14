@@ -3,7 +3,13 @@
  * Handles creating, splitting, and modifying pane layouts
  */
 
-import type { Layout, LayoutType, SplitDirection } from '../../../shared/types/models.js';
+import type {
+  Layout,
+  LayoutType,
+  PresetLayoutName,
+  SplitDirection,
+} from '../../../shared/types/models.js';
+export type { PresetLayoutName } from '../../../shared/types/models.js';
 import { logger } from '../utils/logger.js';
 
 /** Maximum number of panes allowed per window */
@@ -467,6 +473,365 @@ export function validateLayout(layout: Layout): { valid: boolean; errors: string
  */
 export function serializeLayout(layout: Layout): string {
   return JSON.stringify(layout);
+}
+
+/**
+ * Swap two panes in the layout tree by exchanging their paneId values.
+ * @param layout The current layout tree
+ * @param paneId1 First pane to swap
+ * @param paneId2 Second pane to swap
+ * @returns The new layout tree with swapped panes, or null if either pane was not found
+ */
+export function swapPanesInLayout(
+  layout: Layout,
+  paneId1: string,
+  paneId2: string
+): Layout | null {
+  // Verify both panes exist
+  if (!paneExistsInLayout(layout, paneId1) || !paneExistsInLayout(layout, paneId2)) {
+    return null;
+  }
+
+  // If swapping with itself, return as-is
+  if (paneId1 === paneId2) {
+    return layout;
+  }
+
+  function swap(node: Layout): Layout {
+    if (node.type === 'leaf') {
+      if (node.paneId === paneId1) {
+        return { ...node, paneId: paneId2 };
+      }
+      if (node.paneId === paneId2) {
+        return { ...node, paneId: paneId1 };
+      }
+      return node;
+    }
+
+    if (!node.children) {
+      return node;
+    }
+
+    return {
+      ...node,
+      children: node.children.map(swap),
+    };
+  }
+
+  return swap(layout);
+}
+
+/**
+ * Rotate all pane IDs in the layout tree.
+ * Collects leaf pane IDs in tree order, shifts them forward by one position
+ * (last becomes first), then reassigns. If reverse is true, shifts backward
+ * (first becomes last).
+ * @param layout The current layout tree
+ * @param reverse If true, rotate backward instead of forward
+ * @returns The new layout tree with rotated pane IDs
+ */
+export function rotatePaneIds(layout: Layout, reverse: boolean = false): Layout {
+  const ids = getPaneIds(layout);
+
+  if (ids.length <= 1) {
+    return layout;
+  }
+
+  // Compute rotated order
+  const rotated: string[] = [];
+  if (reverse) {
+    // Shift backward: [A, B, C, D] -> [B, C, D, A]
+    for (let i = 1; i < ids.length; i++) {
+      const id = ids[i];
+      if (id !== undefined) {
+        rotated.push(id);
+      }
+    }
+    const first = ids[0];
+    if (first !== undefined) {
+      rotated.push(first);
+    }
+  } else {
+    // Shift forward: [A, B, C, D] -> [D, A, B, C]
+    const last = ids[ids.length - 1];
+    if (last !== undefined) {
+      rotated.push(last);
+    }
+    for (let i = 0; i < ids.length - 1; i++) {
+      const id = ids[i];
+      if (id !== undefined) {
+        rotated.push(id);
+      }
+    }
+  }
+
+  // Assign rotated IDs back to leaf nodes in tree order
+  let index = 0;
+
+  function assignIds(node: Layout): Layout {
+    if (node.type === 'leaf' && node.paneId) {
+      const newId = rotated[index];
+      index++;
+      if (newId !== undefined) {
+        return { ...node, paneId: newId };
+      }
+      return node;
+    }
+
+    if (!node.children) {
+      return node;
+    }
+
+    return {
+      ...node,
+      children: node.children.map(assignIds),
+    };
+  }
+
+  return assignIds(layout);
+}
+
+/** Result type for extractPane when the pane was found and removed */
+export interface ExtractPaneFound {
+  remainingLayout: Layout | null;
+  extracted: true;
+}
+
+/** Result type for extractPane when the pane was not found */
+export interface ExtractPaneNotFound {
+  remainingLayout: Layout;
+  extracted: false;
+}
+
+/** Result type for extractPane */
+export type ExtractPaneResult = ExtractPaneFound | ExtractPaneNotFound;
+
+/**
+ * Remove a pane from the layout and return both the remaining layout
+ * and whether extraction succeeded. Uses removePane internally.
+ * @param layout The current layout tree
+ * @param paneId The pane to extract
+ * @returns Object with remainingLayout and extracted flag
+ */
+export function extractPane(layout: Layout, paneId: string): ExtractPaneResult {
+  if (!paneExistsInLayout(layout, paneId)) {
+    return { remainingLayout: layout, extracted: false };
+  }
+
+  const remainingLayout = removePane(layout, paneId);
+  return { remainingLayout, extracted: true };
+}
+
+/**
+ * Insert a new pane into the layout adjacent to a target pane.
+ * Similar to splitLayout but intended for moving an existing pane
+ * (e.g., join-pane). The new pane is placed after the target in the
+ * specified direction with equal sizing.
+ * @param layout The current layout tree
+ * @param targetPaneId The pane to insert next to
+ * @param newPaneId The pane ID to insert
+ * @param direction Split direction ('h' for horizontal, 'v' for vertical)
+ * @returns The new layout tree, or null if the target pane was not found
+ */
+export function insertPaneIntoLayout(
+  layout: Layout,
+  targetPaneId: string,
+  newPaneId: string,
+  direction: SplitDirection
+): Layout | null {
+  return splitLayout(layout, targetPaneId, direction, newPaneId, DEFAULT_SPLIT_RATIO);
+}
+
+// ============================================================================
+// Preset layout algorithms
+// ============================================================================
+
+/** Ordered list of preset layout names for cycling */
+export const PRESET_LAYOUT_ORDER: PresetLayoutName[] = [
+  'even-horizontal',
+  'even-vertical',
+  'main-horizontal',
+  'main-vertical',
+  'tiled',
+];
+
+/**
+ * Even-horizontal layout: all panes stacked top-to-bottom with equal heights.
+ */
+export function evenHorizontalLayout(paneIds: string[]): Layout {
+  if (paneIds.length === 0) {
+    return { type: 'leaf', paneId: '' };
+  }
+  if (paneIds.length === 1) {
+    const id = paneIds[0];
+    return createLeafLayout(id!);
+  }
+
+  const n = paneIds.length;
+  const size = 1 / n;
+  return {
+    type: 'horizontal',
+    children: paneIds.map((id) => createLeafLayout(id)),
+    sizes: paneIds.map(() => size),
+  };
+}
+
+/**
+ * Even-vertical layout: all panes side-by-side with equal widths.
+ */
+export function evenVerticalLayout(paneIds: string[]): Layout {
+  if (paneIds.length === 0) {
+    return { type: 'leaf', paneId: '' };
+  }
+  if (paneIds.length === 1) {
+    const id = paneIds[0];
+    return createLeafLayout(id!);
+  }
+
+  const n = paneIds.length;
+  const size = 1 / n;
+  return {
+    type: 'vertical',
+    children: paneIds.map((id) => createLeafLayout(id)),
+    sizes: paneIds.map(() => size),
+  };
+}
+
+/**
+ * Main-horizontal layout: first pane gets top half, remaining panes
+ * split equally in the bottom half side-by-side.
+ */
+export function mainHorizontalLayout(paneIds: string[]): Layout {
+  if (paneIds.length === 0) {
+    return { type: 'leaf', paneId: '' };
+  }
+  if (paneIds.length === 1) {
+    const id = paneIds[0];
+    return createLeafLayout(id!);
+  }
+
+  const first = paneIds[0]!;
+  const rest = paneIds.slice(1);
+  const restSize = 1 / rest.length;
+
+  return {
+    type: 'horizontal',
+    children: [
+      createLeafLayout(first),
+      {
+        type: 'vertical',
+        children: rest.map((id) => createLeafLayout(id)),
+        sizes: rest.map(() => restSize),
+      },
+    ],
+    sizes: [0.5, 0.5],
+  };
+}
+
+/**
+ * Main-vertical layout: first pane gets left half, remaining panes
+ * split equally in the right half stacked top-to-bottom.
+ */
+export function mainVerticalLayout(paneIds: string[]): Layout {
+  if (paneIds.length === 0) {
+    return { type: 'leaf', paneId: '' };
+  }
+  if (paneIds.length === 1) {
+    const id = paneIds[0];
+    return createLeafLayout(id!);
+  }
+
+  const first = paneIds[0]!;
+  const rest = paneIds.slice(1);
+  const restSize = 1 / rest.length;
+
+  return {
+    type: 'vertical',
+    children: [
+      createLeafLayout(first),
+      {
+        type: 'horizontal',
+        children: rest.map((id) => createLeafLayout(id)),
+        sizes: rest.map(() => restSize),
+      },
+    ],
+    sizes: [0.5, 0.5],
+  };
+}
+
+/**
+ * Tiled layout: arranges panes in a grid.
+ * cols = ceil(sqrt(n)), rows = ceil(n / cols).
+ * Built as vertical split of horizontal rows.
+ * Last row may have fewer panes (wider each).
+ */
+export function tiledLayout(paneIds: string[]): Layout {
+  if (paneIds.length === 0) {
+    return { type: 'leaf', paneId: '' };
+  }
+  if (paneIds.length === 1) {
+    const id = paneIds[0];
+    return createLeafLayout(id!);
+  }
+
+  const n = paneIds.length;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+
+  // Build rows
+  const rowLayouts: Layout[] = [];
+  let idx = 0;
+
+  for (let r = 0; r < rows; r++) {
+    const rowPanes: string[] = [];
+    for (let c = 0; c < cols && idx < n; c++) {
+      const id = paneIds[idx];
+      if (id !== undefined) {
+        rowPanes.push(id);
+      }
+      idx++;
+    }
+
+    if (rowPanes.length === 1) {
+      rowLayouts.push(createLeafLayout(rowPanes[0]!));
+    } else {
+      const colSize = 1 / rowPanes.length;
+      rowLayouts.push({
+        type: 'vertical',
+        children: rowPanes.map((id) => createLeafLayout(id)),
+        sizes: rowPanes.map(() => colSize),
+      });
+    }
+  }
+
+  if (rowLayouts.length === 1) {
+    return rowLayouts[0]!;
+  }
+
+  const rowSize = 1 / rowLayouts.length;
+  return {
+    type: 'horizontal',
+    children: rowLayouts,
+    sizes: rowLayouts.map(() => rowSize),
+  };
+}
+
+/**
+ * Apply a preset layout by name to a set of pane IDs.
+ */
+export function applyPresetLayout(name: PresetLayoutName, paneIds: string[]): Layout {
+  switch (name) {
+    case 'even-horizontal':
+      return evenHorizontalLayout(paneIds);
+    case 'even-vertical':
+      return evenVerticalLayout(paneIds);
+    case 'main-horizontal':
+      return mainHorizontalLayout(paneIds);
+    case 'main-vertical':
+      return mainVerticalLayout(paneIds);
+    case 'tiled':
+      return tiledLayout(paneIds);
+  }
 }
 
 /**

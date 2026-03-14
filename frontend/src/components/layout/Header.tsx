@@ -82,25 +82,26 @@ export function Header({
       className={`
         flex items-center justify-between
         h-10 px-4
-        bg-gray-950 border-b border-gray-800
+        bg-card border-b border-border
         ${className}
       `}
     >
       {/* Left: Logo + Menu button */}
       <div className="flex items-center gap-1">
         <img
-          src="/favicon.ico"
+          src="/webterm-logo.png"
           alt="WebTerm"
-          className="w-6 h-6"
+          className="w-5 h-5 drop-shadow-[0_0_4px_var(--glow-muted)]"
         />
         <button
           onClick={onMenuClick}
           className="
             p-2
-            text-gray-400 hover:text-green-400
+            text-primary hover:brightness-125
+            drop-shadow-[0_0_4px_var(--glow-muted)]
             rounded
             transition-colors
-            focus:outline-none focus:ring-2 focus:ring-green-500/50
+            focus:outline-none focus:ring-2 focus:ring-ring/50
           "
           type="button"
           aria-label="Open menu"
@@ -133,10 +134,10 @@ export function Header({
           onBlur={handleSave}
           maxLength={50}
           className="
-            text-lg font-bold text-green-400
-            bg-gray-800 border border-green-500
+            text-lg font-bold text-primary
+            bg-input border border-primary
             rounded px-2 py-0.5
-            focus:outline-none focus:ring-2 focus:ring-green-500
+            focus:outline-none focus:ring-2 focus:ring-ring
             text-center
             w-64 max-w-[50vw]
           "
@@ -146,13 +147,13 @@ export function Header({
         <button
           onClick={handleNameClick}
           className="
-            glitch-text
+            glow-text
             text-lg font-bold
-            text-green-400
-            hover:text-green-300
+            text-primary
+            hover:brightness-125
             cursor-pointer
             transition-colors
-            focus:outline-none focus:ring-2 focus:ring-green-500/50 focus:rounded
+            focus:outline-none focus:ring-2 focus:ring-ring/50 focus:rounded
           "
           type="button"
           aria-label={`Session: ${sessionName}. Click to edit.`}
@@ -161,17 +162,19 @@ export function Header({
         </button>
       )}
 
-      {/* Right: Settings + Connection status */}
+      {/* Right: Connection status + Settings */}
       <div className="flex items-center gap-2">
+        <ConnectionStatus state={connectionState} />
         {onSettingsClick && (
           <button
             onClick={onSettingsClick}
             className="
               p-2
-              text-gray-400 hover:text-green-400
+              text-primary hover:brightness-125
+              drop-shadow-[0_0_4px_var(--glow-muted)]
               rounded
               transition-colors
-              focus:outline-none focus:ring-2 focus:ring-green-500/50
+              focus:outline-none focus:ring-2 focus:ring-ring/50
             "
             type="button"
             aria-label="Open settings"
@@ -182,9 +185,6 @@ export function Header({
             </svg>
           </button>
         )}
-        <div className="relative">
-          <ConnectionStatus state={connectionState} className="static" />
-        </div>
       </div>
     </header>
   );

@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import type { SessionListItem } from '@webterm/shared/models';
+import { exportSession } from '../../services/export-service';
 
 export interface SessionListProps {
   /** Array of sessions to display */
@@ -10,6 +11,8 @@ export interface SessionListProps {
   onRestore: (sessionId: string) => void;
   /** Callback when delete button is clicked */
   onDelete: (sessionId: string) => void;
+  /** ID of the currently active session (cannot be deleted) */
+  currentSessionId?: string | undefined;
   /** Additional CSS classes */
   className?: string;
 }
@@ -32,6 +35,7 @@ export function SessionList({
   isLoading = false,
   onRestore,
   onDelete,
+  currentSessionId,
   className = '',
 }: SessionListProps) {
   const handleRestore = useCallback(
@@ -47,6 +51,19 @@ export function SessionList({
     },
     [onDelete]
   );
+
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  const handleExport = useCallback(async (sessionId: string) => {
+    setExportingId(sessionId);
+    try {
+      await exportSession(sessionId);
+    } catch (err) {
+      console.error('[SessionList] Export failed:', err);
+    } finally {
+      setExportingId(null);
+    }
+  }, []);
 
   if (isLoading) {
     return (
@@ -86,22 +103,29 @@ export function SessionList({
 
   return (
     <div className={`space-y-2 ${className}`}>
-      {sessions.map((session) => (
+      {sessions.map((session) => {
+        const isActive = session.id === currentSessionId;
+        return (
         <div
           key={session.id}
-          className="
+          className={`
             flex items-center justify-between
             p-4
-            bg-gray-800/50 hover:bg-gray-800
-            border border-gray-700 hover:border-green-600/50
+            ${isActive ? 'bg-green-900/30 border-green-600/70' : 'bg-gray-800/50 hover:bg-gray-800 border-gray-700 hover:border-green-600/50'}
+            border
             rounded-lg
             transition-colors
-          "
+          `}
         >
           {/* Session info */}
           <div className="flex-1 min-w-0">
             <h3 className="text-lg font-medium text-gray-200 truncate">
               {session.name}
+              {isActive && (
+                <span className="ml-2 text-xs font-normal text-green-400 bg-green-900/50 px-2 py-0.5 rounded">
+                  active
+                </span>
+              )}
             </h3>
             <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
               <span>{formatDate(session.createdAt)}</span>
@@ -160,16 +184,47 @@ export function SessionList({
               Restore
             </button>
             <button
-              onClick={() => handleDelete(session.id)}
-              className="
+              onClick={() => void handleExport(session.id)}
+              disabled={exportingId === session.id}
+              className={`
                 p-2
-                text-gray-400 hover:text-red-400
+                rounded-md
+                transition-colors
+                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900
+                ${exportingId === session.id ? 'text-gray-600 cursor-not-allowed' : 'text-gray-400 hover:text-blue-400'}
+              `}
+              type="button"
+              title={`Export session ${session.name}`}
+              aria-label={`Export session ${session.name}`}
+            >
+              <svg
+                className={`w-5 h-5 ${exportingId === session.id ? 'animate-pulse' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => handleDelete(session.id)}
+              disabled={isActive}
+              className={`
+                p-2
                 rounded-md
                 transition-colors
                 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900
-              "
+                ${isActive ? 'text-gray-600 cursor-not-allowed' : 'text-gray-400 hover:text-red-400'}
+              `}
               type="button"
-              aria-label={`Delete session ${session.name}`}
+              title={isActive ? 'Cannot delete active session' : `Delete session ${session.name}`}
+              aria-label={isActive ? 'Cannot delete active session' : `Delete session ${session.name}`}
             >
               <svg
                 className="w-5 h-5"
@@ -188,7 +243,8 @@ export function SessionList({
             </button>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

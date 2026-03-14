@@ -41,8 +41,12 @@ coverage/
 
 # Temp
 *.tmp
+*.tmp.*
 .temp/
 .cache/
 
 # Publish staging
 publish/
+
+# RLM Navigator (local install)
+.rlm/

@@ -43,19 +43,27 @@ export interface WebSocketCallbacks {
   onError?: (error: Error) => void;
 }
 
+/** Backend port for direct WebSocket connection in dev mode */
+const DEV_BACKEND_PORT = 9174;
+
+/** Get default WebSocket URL based on environment */
+function getDefaultWebSocketUrl(): string {
+  // In dev mode, connect directly to backend to bypass Vite proxy
+  // (Vite's WS proxy doesn't recover after backend restarts)
+  if (import.meta.env.DEV) {
+    return `ws://${window.location.hostname}:${DEV_BACKEND_PORT}/ws`;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
 const DEFAULT_CONFIG: Required<WebSocketClientConfig> = {
   url: getDefaultWebSocketUrl(),
-  maxReconnectAttempts: 10,
+  maxReconnectAttempts: Infinity,
   initialReconnectDelay: 1000,
   maxReconnectDelay: 30000,
   reconnectBackoffMultiplier: 2,
 };
-
-/** Get default WebSocket URL based on environment */
-function getDefaultWebSocketUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/ws`;
-}
 
 /**
  * WebSocket client for terminal communication
@@ -90,16 +98,36 @@ export class WebSocketClient {
     this.callbacks = { ...this.callbacks, ...callbacks };
   }
 
+  /** Switch to a different session by disconnecting and reconnecting */
+  switchSession(newSessionId: string): void {
+    this.disconnect();
+    this.connect(newSessionId);
+  }
+
   /** Connect to WebSocket server */
   connect(sessionId?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
-      return;
+      // Allow reconnection when switching to a different session
+      if (sessionId && sessionId !== this.sessionId) {
+        this.disconnect();
+      } else {
+        return;
+      }
     }
 
     this.intentionalClose = false;
     this.sessionId = sessionId ?? null;
     this.setState('connecting');
-    
+
+    // Detach handlers from old socket to prevent ghost events
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
+      this.ws = null;
+    }
+
     const url = new URL(this.config.url);
     if (sessionId) {
       url.searchParams.set('sessionId', sessionId);
@@ -251,6 +279,26 @@ export class WebSocketClient {
     this.sendJson({
       type: 'switchWindow',
       payload: { windowId },
+    });
+  }
+
+  /** Send a tmux command for execution */
+  sendExecuteCommand(command: string): void {
+    this.sendJson({
+      type: 'executeCommand',
+      payload: { command },
+    });
+  }
+
+  /** Send yank-to-buffer message (copy mode yank) */
+  sendYankToBuffer(content: string, bufferName?: string): void {
+    const payload: { content: string; bufferName?: string } = { content };
+    if (bufferName !== undefined) {
+      payload.bufferName = bufferName;
+    }
+    this.sendJson({
+      type: 'yankToBuffer',
+      payload,
     });
   }
 

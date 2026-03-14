@@ -4,6 +4,7 @@ import type { ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalHandle {
@@ -19,6 +20,8 @@ export interface TerminalHandle {
   getSelection: () => string;
   /** Check if the terminal has a selection */
   hasSelection: () => boolean;
+  /** Serialize terminal content (scrollback + visible) */
+  serialize: () => string | null;
 }
 
 export interface TerminalProps {
@@ -26,6 +29,8 @@ export interface TerminalProps {
   onData?: (data: string) => void;
   /** Callback when terminal resizes */
   onResize?: (cols: number, rows: number) => void;
+  /** Callback when the terminal title changes (e.g. shell sets CWD via OSC sequence) */
+  onTitleChange?: (title: string) => void;
   /** Whether the terminal is focused */
   isFocused?: boolean;
   /** Custom font size */
@@ -69,6 +74,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     {
       onData,
       onResize,
+      onTitleChange,
       isFocused = false,
       fontSize = 14,
       fontFamily = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
@@ -82,7 +88,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const fitAddonRef = useRef<FitAddon | null>(null);
     const webglAddonRef = useRef<WebglAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const serializeAddonRef = useRef<SerializeAddon | null>(null);
     const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onTitleChangeRef = useRef(onTitleChange);
 
     // Expose methods via ref
     useImperativeHandle(
@@ -103,6 +111,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         }),
         getSelection: () => terminalRef.current?.getSelection() ?? '',
         hasSelection: () => terminalRef.current?.hasSelection() ?? false,
+        serialize: () => serializeAddonRef.current?.serialize() ?? null,
       }),
       []
     );
@@ -154,6 +163,22 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Open terminal in container
       terminal.open(containerRef.current);
 
+      // Attach custom key event handler — returning false prevents xterm
+      // from processing the key (used by the prefix-key / keybinding system).
+      // The global handler is set by useGlobalKeyBindings in App.tsx.
+      terminal.attachCustomKeyEventHandler((event) => {
+        if (globalThis.webtermKeyHandler) {
+          const allowXterm = globalThis.webtermKeyHandler(event);
+          if (!allowXterm) {
+            // Mark so the global capture listener skips double-processing
+            (event as KeyboardEvent & { _webtermHandled?: boolean })._webtermHandled = true;
+          }
+          return allowXterm;
+        }
+        console.warn('[Terminal] webtermKeyHandler not set, key passed to xterm:', event.key);
+        return true;
+      });
+
       // Load WebGL addon for GPU-accelerated rendering
       try {
         const webglAddon = new WebglAddon();
@@ -173,6 +198,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       // Load web links addon
       const webLinksAddon = new WebLinksAddon();
       terminal.loadAddon(webLinksAddon);
+
+      // Load serialize addon for scrollback capture
+      const serializeAddn = new SerializeAddon();
+      serializeAddonRef.current = serializeAddn;
+      terminal.loadAddon(serializeAddn);
 
       // Initial fit
       requestAnimationFrame(() => {
@@ -199,6 +229,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         onData?.(data);
       });
 
+      // Set up title change handler via ref (avoids re-creating terminal when callback changes)
+      const titleDisposable = terminal.onTitleChange((title) => {
+        onTitleChangeRef.current?.(title);
+      });
+
       // Cleanup on unmount
       return () => {
         if (resizeTimeoutRef.current) {
@@ -206,13 +241,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         }
         resizeObserverRef.current?.disconnect();
         dataDisposable.dispose();
+        titleDisposable.dispose();
         webglAddonRef.current?.dispose();
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
+        serializeAddonRef.current = null;
       };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [onData, onResize, debouncedFit]);
+
+    // Keep onTitleChange ref in sync without re-initializing the terminal
+    onTitleChangeRef.current = onTitleChange;
 
     // Reactively update terminal settings without recreating the instance
     useEffect(() => {
@@ -223,15 +263,44 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       terminal.options.fontFamily = fontFamily;
       terminal.options.theme = theme ?? defaultTheme;
 
-      // Refit after settings change
-      if (fitAddonRef.current) {
+      // Font changes invalidate the WebGL glyph atlas — dispose and reload
+      // the addon so it rebuilds its texture cache with the new metrics.
+      if (webglAddonRef.current) {
         try {
-          fitAddonRef.current.fit();
+          webglAddonRef.current.dispose();
+          webglAddonRef.current = null;
         } catch {
-          // ignore fit errors during transitions
+          // ignore disposal errors
+        }
+
+        try {
+          const newWebgl = new WebglAddon();
+          newWebgl.onContextLoss(() => {
+            newWebgl.dispose();
+            webglAddonRef.current = null;
+          });
+          terminal.loadAddon(newWebgl);
+          webglAddonRef.current = newWebgl;
+        } catch {
+          // fall back to canvas renderer if WebGL fails
+          webglAddonRef.current = null;
         }
       }
-    }, [fontSize, fontFamily, theme]);
+
+      // Delay fit until xterm recalculates character cell dimensions
+      requestAnimationFrame(() => {
+        if (fitAddonRef.current && terminalRef.current) {
+          try {
+            fitAddonRef.current.fit();
+            const { cols, rows } = terminalRef.current;
+            terminalRef.current.refresh(0, rows - 1);
+            onResize?.(cols, rows);
+          } catch {
+            // ignore fit errors during transitions
+          }
+        }
+      });
+    }, [fontSize, fontFamily, theme, onResize]);
 
     // Handle focus changes
     useEffect(() => {

@@ -53,6 +53,8 @@ export interface UseWebSocketReturn {
   sendInput: (paneId: string, data: string | Uint8Array) => void;
   /** Send resize message */
   sendResize: (paneId: string, cols: number, rows: number) => void;
+  /** Switch to a different session */
+  switchSession: (newSessionId: string) => void;
   /** WebSocket client instance */
   client: WebSocketClient;
 }
@@ -182,11 +184,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     clientRef.current?.sendResize(paneId, cols, rows);
   }, []);
 
+  const switchSession = useCallback((newSessionId: string) => {
+    clientRef.current?.switchSession(newSessionId);
+  }, []);
+
   return {
     connectionState,
     sessionId,
     connect,
     disconnect,
+    switchSession,
     sendMessage,
     sendBinary,
     sendInput,

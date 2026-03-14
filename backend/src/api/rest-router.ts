@@ -6,15 +6,19 @@
 import { Buffer } from 'node:buffer';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { handleHealthCheck } from './routes/health.js';
-import { handleSystemInfo } from './routes/system.js';
+import { handleSystemInfo, handlePickDirectory, handleValidateDirectory } from './routes/system.js';
 import {
   handleListSessions,
   handleGetSession,
   handleCreateSession,
   handleUpdateSession,
   handleDeleteSession,
+  handleClearAllSessions,
   handleSaveSession,
+  handleImportSession,
 } from './routes/sessions.js';
+import { handleListKeybindings } from './routes/keybindings.js';
+import { handleExecuteCommand, handleListPanes } from './routes/commands.js';
 import { logger } from '../utils/logger.js';
 import { isWebTermError, toErrorResponse, ValidationError } from '../utils/errors.js';
 
@@ -32,6 +36,7 @@ interface Route {
   pattern: RegExp;
   paramNames: string[];
   handler: RouteHandler;
+  maxBodySize?: number;
 }
 
 /** Registered routes */
@@ -40,7 +45,7 @@ const routes: Route[] = [];
 /**
  * Register a route
  */
-function registerRoute(method: string, path: string, handler: RouteHandler): void {
+function registerRoute(method: string, path: string, handler: RouteHandler, options?: { maxBodySize?: number }): void {
   // Convert path pattern to regex
   // /sessions/:id -> /sessions/([^/]+)
   const paramNames: string[] = [];
@@ -54,6 +59,7 @@ function registerRoute(method: string, path: string, handler: RouteHandler): voi
     pattern: new RegExp(`^${patternStr}$`),
     paramNames,
     handler,
+    ...(options?.maxBodySize !== undefined ? { maxBodySize: options.maxBodySize } : {}),
   });
 }
 
@@ -66,14 +72,27 @@ registerRoute('GET', '/health', handleHealthCheck);
 
 // System info
 registerRoute('GET', '/api/v1/system/info', handleSystemInfo);
+registerRoute('POST', '/api/v1/system/pick-directory', handlePickDirectory);
+registerRoute('POST', '/api/v1/system/validate-directory', handleValidateDirectory);
 
 // Sessions
 registerRoute('GET', '/api/v1/sessions', handleListSessions);
+registerRoute('POST', '/api/v1/sessions/import', handleImportSession, { maxBodySize: 10 * 1024 * 1024 });
 registerRoute('GET', '/api/v1/sessions/:id', handleGetSession);
 registerRoute('POST', '/api/v1/sessions', handleCreateSession);
 registerRoute('PATCH', '/api/v1/sessions/:id', handleUpdateSession);
+registerRoute('DELETE', '/api/v1/sessions', handleClearAllSessions);
 registerRoute('DELETE', '/api/v1/sessions/:id', handleDeleteSession);
 registerRoute('POST', '/api/v1/sessions/:id/save', handleSaveSession);
+
+// Keybindings
+registerRoute('GET', '/api/v1/keybindings', handleListKeybindings);
+
+// Command execution (used by tmux shim)
+registerRoute('POST', '/api/v1/command', handleExecuteCommand);
+
+// Pane listing (used by tmux shim for list-panes)
+registerRoute('GET', '/api/v1/panes', handleListPanes);
 
 // ============================================================================
 // Request Handler
@@ -94,11 +113,10 @@ function getPathname(req: IncomingMessage): string {
 /**
  * Parse JSON body from request
  */
-async function parseJsonBody(req: IncomingMessage): Promise<unknown> {
+async function parseJsonBody(req: IncomingMessage, maxSize = 1024 * 1024): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    const maxSize = 1024 * 1024; // 1MB limit
 
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
@@ -204,10 +222,10 @@ export async function handleRequest(req: IncomingMessage, res: ServerResponse): 
     });
 
     try {
-      // Parse body for POST/PATCH requests
+      // Parse body for POST/PATCH/DELETE requests
       let body: unknown;
-      if (method === 'POST' || method === 'PATCH') {
-        body = await parseJsonBody(req);
+      if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
+        body = await parseJsonBody(req, route.maxBodySize);
       }
 
       // Call handler

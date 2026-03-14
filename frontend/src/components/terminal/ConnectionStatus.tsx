@@ -9,27 +9,23 @@ export interface ConnectionStatusProps {
 
 const stateConfig: Record<
   ConnectionState,
-  { label: string; colorClass: string; dotClass: string }
+  { label: string; dotClass: string }
 > = {
   connected: {
     label: 'Connected',
-    colorClass: 'bg-green-900/50 text-green-400 border-green-600',
     dotClass: 'bg-green-500',
   },
   connecting: {
     label: 'Connecting',
-    colorClass: 'bg-yellow-900/50 text-yellow-400 border-yellow-600',
     dotClass: 'bg-yellow-500 animate-pulse',
   },
   disconnected: {
     label: 'Disconnected',
-    colorClass: 'bg-red-900/50 text-red-400 border-red-600',
-    dotClass: 'bg-red-500',
+    dotClass: 'bg-destructive',
   },
   exited: {
     label: 'Exited',
-    colorClass: 'bg-gray-900/50 text-gray-400 border-gray-600',
-    dotClass: 'bg-gray-500',
+    dotClass: 'bg-destructive',
   },
 };
 
@@ -39,11 +35,11 @@ export function ConnectionStatus({ state, className = '' }: ConnectionStatusProp
   if (!config) {
     return (
       <div
-        className={`absolute top-1 right-1 z-20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded border bg-gray-900/50 text-gray-400 border-gray-600 ${className}`}
+        className={`flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded border border-border bg-card text-muted-foreground ${className}`}
         role="status"
         aria-label="Connection status: Unknown"
       >
-        <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
+        <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
         <span>Unknown</span>
       </div>
     );
@@ -52,12 +48,11 @@ export function ConnectionStatus({ state, className = '' }: ConnectionStatusProp
   return (
     <div
       className={`
-        absolute top-1 right-1 z-20
         flex items-center gap-1.5
         px-2 py-0.5
         text-[10px] font-semibold uppercase tracking-wider
-        rounded border
-        ${config.colorClass}
+        rounded border border-border bg-card text-primary
+        glow-border
         ${className}
       `}
       role="status"

@@ -95,6 +95,23 @@ export async function deleteSession(id: string): Promise<void> {
 }
 
 /**
+ * Clear all sessions except the active one
+ * DELETE /api/v1/sessions
+ */
+export async function clearAllSessions(
+  keepSessionId: string
+): Promise<{ deleted: number }> {
+  const response = await fetch(`${API_BASE}/sessions`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ keepSessionId }),
+  });
+  return handleResponse<{ deleted: number }>(response);
+}
+
+/**
  * Save session state (persist to disk)
  * POST /api/v1/sessions/:id/save
  */
@@ -106,6 +123,29 @@ export async function saveSession(id: string): Promise<Session> {
     }
   );
   return handleResponse<Session>(response);
+}
+
+/**
+ * Import a session from an export payload
+ * POST /api/v1/sessions/import
+ */
+export async function importSessionApi(
+  data: import('@webterm/shared/index').SessionExport
+): Promise<{
+  session: SessionWithWindows;
+  paneIdMap: Record<string, string>;
+}> {
+  const response = await fetch(`${API_BASE}/sessions/import`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<{
+    session: SessionWithWindows;
+    paneIdMap: Record<string, string>;
+  }>(response);
 }
 
 // ============================================================================

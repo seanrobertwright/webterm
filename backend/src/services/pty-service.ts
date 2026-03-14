@@ -4,10 +4,19 @@
  */
 
 import * as pty from '@lydell/node-pty';
+import * as fs from 'node:fs';
 import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { getDefaultShell, resolveShellPath } from './shell-service.js';
 import { logger } from '../utils/logger.js';
 import type { ShellType } from '../../../shared/types/models.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/** Directory containing the tmux shim script */
+const TMUX_SHIM_DIR = path.resolve(__dirname, '..', 'tmux-shim');
 
 /** Options for spawning a new PTY */
 export interface PtySpawnOptions {
@@ -21,6 +30,8 @@ export interface PtySpawnOptions {
   rows?: number;
   /** Environment variables to add */
   env?: Record<string, string>;
+  /** Session ID (used for TMUX env var) */
+  sessionId?: string;
 }
 
 /** PTY instance with metadata */
@@ -38,6 +49,8 @@ export interface PtyInstance {
 export interface PtyEventHandlers {
   onData?: (paneId: string, data: string) => void;
   onExit?: (paneId: string, exitCode: number, signal?: number) => void;
+  onTitleChange?: (paneId: string, title: string) => void;
+  onBell?: (paneId: string) => void;
 }
 
 /** Default terminal dimensions */
@@ -50,6 +63,12 @@ const DEFAULT_ROWS = 24;
 export class PtyManager {
   private terminals: Map<string, PtyInstance> = new Map();
   private eventHandlers: PtyEventHandlers = {};
+  private paneCounter = 0;
+
+  /** Map pane UUID -> tmux-style pane index (the N in %N) */
+  private paneIndexMap: Map<string, number> = new Map();
+  /** Reverse map: tmux pane index -> pane UUID */
+  private indexToPaneMap: Map<number, string> = new Map();
 
   /**
    * Set event handlers for PTY events
@@ -95,11 +114,19 @@ export class PtyManager {
   spawn(paneId: string, options: PtySpawnOptions = {}): PtyInstance {
     const {
       shell,
-      cwd = os.homedir(),
       cols = DEFAULT_COLS,
       rows = DEFAULT_ROWS,
       env,
+      sessionId,
     } = options;
+
+    let cwd = options.cwd ?? os.homedir();
+
+    // Safety net: fall back to home directory if configured cwd is invalid
+    if (cwd && cwd !== os.homedir() && !fs.existsSync(cwd)) {
+      logger.warn(`Configured cwd does not exist: ${cwd}, falling back to home directory`);
+      cwd = os.homedir();
+    }
 
     // Resolve shell path
     let shellPath: string;
@@ -111,14 +138,46 @@ export class PtyManager {
       shellPath = shell;
     }
 
+    // Assign a pane index for TMUX_PANE env var
+    const paneIndex = this.paneCounter++;
+
+    // Track the mapping between pane UUID and tmux-style %N index
+    this.paneIndexMap.set(paneId, paneIndex);
+    this.indexToPaneMap.set(paneIndex, paneId);
+
+    // Build TMUX environment variables so child processes know they're inside a
+    // tmux-compatible multiplexer.
+    const tmuxEnv: Record<string, string> = {
+      TMUX: `/tmp/webterm-${sessionId ?? 'unknown'},${process.pid},0`,
+      TMUX_PANE: `%${paneIndex}`,
+      WEBTERM_PANE_ID: paneId,
+      WEBTERM_SESSION_ID: sessionId ?? '',
+      WEBTERM_PORT: String(process.env['PORT'] ?? '9174'),
+    };
+
+    // Prepend the tmux shim directory to PATH so `tmux` commands from child
+    // processes are intercepted by our shim rather than a real tmux binary.
+    const pathSep = os.platform() === 'win32' ? ';' : ':';
+    const pathKey = os.platform() === 'win32' ? 'Path' : 'PATH';
+    const currentPath = env?.[pathKey] ?? process.env[pathKey] ?? process.env['PATH'] ?? '';
+    tmuxEnv[pathKey] = `${TMUX_SHIM_DIR}${pathSep}${currentPath}`;
+
     logger.info(`Spawning PTY for pane ${paneId}: ${shellPath} (${cols}x${rows}) in ${cwd}`);
 
     // Prepare shell arguments
     let shellArgs: string[] = [];
     
-    // PowerShell-specific args for better terminal behavior
+    // PowerShell-specific args: inject custom prompt that emits OSC title with CWD
+    // ConPTY doesn't translate SetConsoleTitle to OSC sequences, so we emit them explicitly.
     if (shellPath.includes('powershell') || shellPath.includes('pwsh')) {
-      shellArgs = ['-NoLogo'];
+      const promptFn = [
+        'function prompt {',
+        '  $p = $executionContext.SessionState.Path.CurrentLocation.Path;',
+        '  Write-Host -NoNewline "$([char]27)]0;$p$([char]7)";',
+        '  "PS $p> "',
+        '}',
+      ].join(' ');
+      shellArgs = ['-NoLogo', '-NoExit', '-Command', promptFn];
     }
 
     // Spawn the PTY
@@ -127,7 +186,7 @@ export class PtyManager {
       cols,
       rows,
       cwd,
-      env: this.getEnvironment(env),
+      env: this.getEnvironment({ ...env, ...tmuxEnv }),
     });
 
     // Store the instance
@@ -143,8 +202,28 @@ export class PtyManager {
 
     this.terminals.set(paneId, instance);
 
+    // Note: PowerShell OSC title setup is handled via -Command args above,
+    // so no post-spawn write is needed.
+
     // Set up event handlers
     ptyProcess.onData((data) => {
+      // Detect OSC 0/2 title sequences: \x1b]0;title\x07 or \x1b]2;title\x07
+      if (this.eventHandlers.onTitleChange) {
+        const oscMatch = /\x1b\](?:0|2);([^\x07]*)\x07/.exec(data);
+        if (oscMatch && oscMatch[1] !== undefined) {
+          this.eventHandlers.onTitleChange(paneId, oscMatch[1]);
+        }
+      }
+
+      // Detect standalone BEL characters (not part of OSC sequences)
+      if (this.eventHandlers.onBell) {
+        // Strip all OSC sequences (ESC ] ... BEL or ESC ] ... ST) first
+        const stripped = data.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+        if (stripped.includes('\x07')) {
+          this.eventHandlers.onBell(paneId);
+        }
+      }
+
       if (this.eventHandlers.onData) {
         this.eventHandlers.onData(paneId, data);
       }
@@ -152,10 +231,17 @@ export class PtyManager {
 
     ptyProcess.onExit(({ exitCode, signal }) => {
       logger.info(`PTY exited for pane ${paneId}: code=${exitCode}, signal=${signal}`);
-      
+
       // Remove from map
       this.terminals.delete(paneId);
-      
+
+      // Clean up pane index mappings
+      const exitIdx = this.paneIndexMap.get(paneId);
+      if (exitIdx !== undefined) {
+        this.indexToPaneMap.delete(exitIdx);
+      }
+      this.paneIndexMap.delete(paneId);
+
       if (this.eventHandlers.onExit) {
         this.eventHandlers.onExit(paneId, exitCode, signal);
       }
@@ -214,6 +300,14 @@ export class PtyManager {
     logger.info(`Killing PTY: ${paneId}`);
     instance.pty.kill();
     this.terminals.delete(paneId);
+
+    // Clean up pane index mappings
+    const idx = this.paneIndexMap.get(paneId);
+    if (idx !== undefined) {
+      this.indexToPaneMap.delete(idx);
+    }
+    this.paneIndexMap.delete(paneId);
+
     return true;
   }
 
@@ -283,9 +377,31 @@ export class PtyManager {
   clear(paneId: string): boolean {
     const instance = this.terminals.get(paneId);
     if (!instance) return false;
-    
+
     instance.pty.clear();
     return true;
+  }
+
+  /**
+   * Get the tmux-style %N pane ID for a given pane UUID.
+   * Returns the string like "%5" or undefined if not found.
+   */
+  getPaneTmuxId(paneId: string): string | undefined {
+    const idx = this.paneIndexMap.get(paneId);
+    if (idx === undefined) return undefined;
+    return `%${idx}`;
+  }
+
+  /**
+   * Resolve a tmux-style %N pane ID back to a pane UUID.
+   * Accepts format "%N" or just "N".
+   * Returns the pane UUID or undefined if not found.
+   */
+  resolveTmuxPaneId(tmuxId: string): string | undefined {
+    const numStr = tmuxId.startsWith('%') ? tmuxId.slice(1) : tmuxId;
+    const idx = parseInt(numStr, 10);
+    if (isNaN(idx)) return undefined;
+    return this.indexToPaneMap.get(idx);
   }
 }
 

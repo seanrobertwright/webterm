@@ -1,9 +1,11 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
+import type { ITheme } from '@xterm/xterm';
 import type { ConnectionState, ShellType } from '@webterm/shared/models';
 import { Terminal, TerminalHandle } from './Terminal';
 import { ConnectionStatus } from './ConnectionStatus';
 import { useSettingsStore } from '../../stores/settings-store';
 import { terminalThemes } from '../../config/terminal-themes';
+import { useTheme } from '../../providers/ThemeProvider';
 
 // Global map to store terminal write functions
 declare global {
@@ -39,6 +41,8 @@ export interface TerminalPaneProps {
   onFocus?: (paneId: string) => void;
   /** Callback to restart the terminal */
   onRestart?: (paneId: string) => void;
+  /** Callback when terminal title changes (e.g. CWD update) */
+  onTitleChange?: (paneId: string, title: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -55,11 +59,54 @@ export function TerminalPane({
   onResize,
   onFocus,
   onRestart,
+  onTitleChange,
   className = '',
 }: TerminalPaneProps) {
   const terminalRef = useRef<TerminalHandle>(null);
   const { fontSize, fontFamily, themeName } = useSettingsStore();
-  const terminalTheme = (terminalThemes[themeName] ?? terminalThemes['default']) as import('@xterm/xterm').ITheme;
+  const { theme: uiTheme } = useTheme();
+
+  // Build xterm.js theme from CSS custom properties so terminal colors follow
+  // the active theGridcn theme. Uses useEffect to read computed styles AFTER
+  // the DOM has updated the data-theme attribute (which happens in ThemeProvider's
+  // useEffect). Falls back to the settings-store terminal theme.
+  const [terminalTheme, setTerminalTheme] = useState<ITheme>(
+    () => (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme
+  );
+
+  useEffect(() => {
+    // requestAnimationFrame ensures the data-theme attribute has been applied
+    // and computed styles are current before we read them.
+    requestAnimationFrame(() => {
+      const base = (terminalThemes[themeName] ?? terminalThemes['default']) as ITheme;
+
+      // Resolve a CSS variable to a browser-computed color (hex/rgb).
+      // oklch() values aren't understood by xterm.js, so we force the browser
+      // to resolve them by assigning to a temp element and reading back.
+      const resolveColor = (varName: string): string | null => {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        if (!raw) return null;
+        const el = document.createElement('div');
+        el.style.color = raw;
+        document.body.appendChild(el);
+        const resolved = getComputedStyle(el).color;
+        document.body.removeChild(el);
+        return resolved || null;
+      };
+
+      const bg = resolveColor('--terminal-bg');
+      const fg = resolveColor('--terminal-fg');
+      const cur = resolveColor('--terminal-cursor');
+      const sel = resolveColor('--terminal-selection');
+      setTerminalTheme({
+        ...base,
+        ...(bg ? { background: bg } : {}),
+        ...(fg ? { foreground: fg } : {}),
+        ...(cur ? { cursor: cur } : {}),
+        ...(sel ? { selectionBackground: sel } : {}),
+      });
+    });
+  }, [themeName, uiTheme]);
 
   // Register terminal write function and handle globally for output and clipboard
   useEffect(() => {
@@ -107,6 +154,13 @@ export function TerminalPane({
     onRestart?.(paneId);
   }, [paneId, onRestart]);
 
+  const handleTitleChange = useCallback(
+    (title: string) => {
+      onTitleChange?.(paneId, title);
+    },
+    [paneId, onTitleChange]
+  );
+
   const hasExited = connectionState === 'exited';
   const isDisconnected = connectionState === 'disconnected';
 
@@ -129,6 +183,7 @@ export function TerminalPane({
           ref={terminalRef}
           onData={handleData}
           onResize={handleResize}
+          onTitleChange={handleTitleChange}
           isFocused={isFocused}
           fontSize={fontSize}
           fontFamily={fontFamily}
@@ -136,8 +191,10 @@ export function TerminalPane({
         />
       </div>
 
-      {/* Connection status indicator */}
-      <ConnectionStatus state={connectionState} />
+      {/* Connection status indicator — only show when not connected (header shows it globally) */}
+      {connectionState !== 'connected' && (
+        <ConnectionStatus state={connectionState} />
+      )}
 
       {/* Broadcast mode indicator */}
       {broadcastMode && (
@@ -179,7 +236,7 @@ export function TerminalPane({
 
       {/* Focus indicator border */}
       {isFocused && (
-        <div className="absolute inset-0 pointer-events-none border-2 border-green-500 rounded" />
+        <div className="absolute inset-0 pointer-events-none border-2 border-primary rounded" />
       )}
     </div>
   );

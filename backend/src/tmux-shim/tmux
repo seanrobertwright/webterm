@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# WebTerm tmux shim
+#
+# Intercepts tmux commands from child processes (e.g. Claude Code) and
+# translates them into HTTP API calls to the WebTerm backend. This script
+# is placed on the PATH ahead of any real tmux binary so that `tmux split-window`
+# etc. are handled by WebTerm instead.
+
+set -euo pipefail
+
+WEBTERM_PORT="${WEBTERM_PORT:-9174}"
+WEBTERM_BASE="http://localhost:${WEBTERM_PORT}/api/v1"
+
+# Helper: POST a command to the WebTerm REST API
+# Accepts the full command string as a single argument.
+# Uses python/node/jq for proper JSON escaping if available, falls back to sed.
+webterm_command() {
+  local cmd="$1"
+  local session_id="${WEBTERM_SESSION_ID:-}"
+  local pane_id="${WEBTERM_PANE_ID:-}"
+
+  # Escape the command string for safe JSON embedding
+  local escaped_cmd
+  escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/$//' | tr '\n' ' ')
+
+  local body
+  body="{\"command\":\"${escaped_cmd}\",\"sessionId\":\"${session_id}\",\"paneId\":\"${pane_id}\"}"
+
+  local response
+  response=$(curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d "$body" \
+    "${WEBTERM_BASE}/command" 2>/dev/null) || {
+    echo "webterm: failed to connect to WebTerm backend at ${WEBTERM_BASE}" >&2
+    exit 1
+  }
+
+  # Parse response
+  local success
+  success=$(echo "$response" | grep -o '"success":\s*true' || true)
+
+  if [ -n "$success" ]; then
+    # Extract output if present -- handle escaped characters in the output
+    local output
+    output=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+    if [ -n "$output" ]; then
+      echo "$output"
+    fi
+    exit 0
+  else
+    # Extract error message
+    local error_msg
+    error_msg=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+    if [ -z "$error_msg" ]; then
+      error_msg=$(echo "$response" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+    fi
+    if [ -z "$error_msg" ]; then
+      error_msg=$(echo "$response" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+    fi
+    echo "webterm: ${error_msg:-command failed}" >&2
+    exit 1
+  fi
+}
+
+# Helper: GET list-panes from the REST API
+webterm_list_panes() {
+  local session_id="${WEBTERM_SESSION_ID:-}"
+
+  local response
+  response=$(curl -s -X GET \
+    "${WEBTERM_BASE}/panes?sessionId=${session_id}" 2>/dev/null) || {
+    echo "webterm: failed to connect to WebTerm backend" >&2
+    exit 1
+  }
+
+  echo "$response"
+  exit 0
+}
+
+# ============================================================================
+# Reconstruct a properly quoted command string from arguments
+# ============================================================================
+
+# Build the full command string from all arguments, preserving quoting for
+# arguments that contain spaces or special characters.
+build_command_string() {
+  local cmd="$1"
+  shift
+
+  local result="$cmd"
+  for arg in "$@"; do
+    # If the arg contains spaces, quotes, or special chars, wrap in quotes
+    if [[ "$arg" =~ [[:space:]\"\'\$\`\\] ]]; then
+      # Escape any existing double quotes and backslashes
+      local escaped
+      escaped=$(printf '%s' "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      result="$result \"$escaped\""
+    else
+      result="$result $arg"
+    fi
+  done
+  echo "$result"
+}
+
+# ============================================================================
+# Command dispatch
+# ============================================================================
+
+if [ $# -eq 0 ]; then
+  echo "webterm tmux shim - use 'tmux <command>' to control WebTerm" >&2
+  echo "Supported commands: split-window, new-window, list-panes, display-message," >&2
+  echo "  select-pane, send-keys, kill-pane, kill-session, has-session, new-session," >&2
+  echo "  resize-pane, list-sessions" >&2
+  exit 0
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+  has-session|has)
+    # Delegate to backend for proper session lookup; fall back to env check
+    if [ $# -eq 0 ]; then
+      # No args: just check if we're in a session
+      if [ -n "${TMUX:-}" ]; then
+        exit 0
+      else
+        exit 1
+      fi
+    fi
+    # Pass through with flags (e.g. -t session_name)
+    webterm_command "$(build_command_string "has-session" "$@")"
+    ;;
+  list-panes|lsp)
+    webterm_list_panes
+    ;;
+  send-keys|send)
+    # send-keys needs special handling: all remaining args are the keys to send
+    # Reconstruct: send-keys [-t target] [-l] key1 key2 ...
+    webterm_command "$(build_command_string "send-keys" "$@")"
+    ;;
+  split-window|splitw)
+    webterm_command "$(build_command_string "split-window" "$@")"
+    ;;
+  new-window|neww)
+    webterm_command "$(build_command_string "new-window" "$@")"
+    ;;
+  new-session|new)
+    webterm_command "$(build_command_string "new-session" "$@")"
+    ;;
+  kill-pane|killp)
+    webterm_command "$(build_command_string "kill-pane" "$@")"
+    ;;
+  kill-session)
+    webterm_command "$(build_command_string "kill-session" "$@")"
+    ;;
+  display-message|display)
+    webterm_command "$(build_command_string "display-message" "$@")"
+    ;;
+  select-pane|selectp)
+    webterm_command "$(build_command_string "select-pane" "$@")"
+    ;;
+  resize-pane|resizep)
+    webterm_command "$(build_command_string "resize-pane" "$@")"
+    ;;
+  list-sessions|ls)
+    webterm_command "list-sessions"
+    ;;
+  select-layout|selectl)
+    webterm_command "$(build_command_string "select-layout" "$@")"
+    ;;
+  *)
+    # For unhandled commands, try passing through to the API
+    webterm_command "$(build_command_string "$COMMAND" "$@")"
+    ;;
+esac
