@@ -32,14 +32,21 @@ function Send-WebtermCommand {
         paneId    = $env:WEBTERM_PANE_ID
     } | ConvertTo-Json -Compress
 
+    # Debug logging
+    $logPath = Join-Path $env:TEMP 'webterm-shim.log'
+    "$(Get-Date -Format 'HH:mm:ss') CMD='$Cmd' SID='$($env:WEBTERM_SESSION_ID)' PID='$($env:WEBTERM_PANE_ID)' BODY=$body" | Out-File -Append -FilePath $logPath
+
     try {
         $resp = Invoke-RestMethod -Uri "${Base}/command" -Method POST `
             -ContentType 'application/json' -Body $body -ErrorAction Stop
     }
     catch {
+        "$(Get-Date -Format 'HH:mm:ss') ERROR: $_" | Out-File -Append -FilePath $logPath
         Write-Error "webterm: failed to connect to WebTerm backend at ${Base}"
         exit 1
     }
+
+    "$(Get-Date -Format 'HH:mm:ss') RESP: success=$($resp.success) output='$($resp.output)'" | Out-File -Append -FilePath $logPath
 
     if ($resp.success) {
         if ($resp.output) { Write-Output $resp.output }

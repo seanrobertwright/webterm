@@ -26,6 +26,7 @@ import {
   PRESET_LAYOUT_ORDER,
   rotatePaneIds,
   splitLayout,
+  splitLayoutMainVertical,
   swapPanesInLayout,
   validatePaneLimit,
 } from './layout-service.js';
@@ -1580,10 +1581,6 @@ export class CommandService {
    * a `paneCreated` message so all connected clients update their view.
    */
   private handleSplitWindow(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
-    const isHorizontal = parsed.flags.get('h') === true;
-    // Default to vertical split (like tmux) unless -h is specified
-    const direction: SplitDirection = isHorizontal ? 'h' : 'v';
-
     const targetPaneId = this.resolvePaneTarget(parsed.flags.get('t'), ctx.paneId);
 
     if (!targetPaneId) {
@@ -1623,18 +1620,21 @@ export class CommandService {
       ...(cwd ? { cwd } : {}),
     });
 
-    // Update the layout tree
-    const newLayout = splitLayout(window.layout, targetPaneId, direction, newPaneId);
-    if (!newLayout) {
-      // Target pane not found — kill the PTY we just spawned
-      ptyManager.kill(newPaneId);
-      return { output: `Pane ${targetPaneId} not found in layout`, success: false };
+    // Use main-vertical layout strategy: main pane stays on the left,
+    // all spawned panes stack vertically on the right.
+    const newLayout = splitLayoutMainVertical(window.layout, newPaneId);
+
+    // Send the shell command to the new pane if one was provided
+    // (e.g. `tmux split-window "claude --arg"`)
+    const shellCommand = parsed.positional.join(' ');
+    if (shellCommand) {
+      // Small delay to let the shell initialize before sending the command
+      setTimeout(() => {
+        ptyManager.write(newPaneId, shellCommand + '\r');
+      }, 150);
     }
 
-    // Persist layout to DB
-    sessionService.updateWindowLayout(windowId, newLayout);
-
-    // Build the Pane object for broadcast
+    // Build the Pane object for broadcast and persistence
     const newPane: Pane = {
       id: newPaneId,
       windowId,
@@ -1650,8 +1650,16 @@ export class CommandService {
       currentCommand: null,
     };
 
+    // Persist pane and layout to DB so they survive reconnection
+    sessionService.insertPane(windowId, newPane);
+    sessionService.updateWindowLayout(windowId, newLayout);
+
+    // Resolve the correct sessionId from the window for broadcasting
+    const resolvedWindow = sessionService.getWindow(windowId);
+    const broadcastSessionId = resolvedWindow?.sessionId ?? ctx.sessionId;
+
     // Broadcast paneCreated to all WebSocket clients in this session
-    broadcastToSession(ctx.sessionId, {
+    broadcastToSession(broadcastSessionId, {
       type: 'paneCreated',
       payload: { pane: newPane, layout: newLayout },
     });
@@ -1659,7 +1667,6 @@ export class CommandService {
     logger.info('split-window: pane split', {
       targetPaneId,
       newPaneId,
-      direction,
       windowId,
     });
 

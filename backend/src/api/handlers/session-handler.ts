@@ -68,6 +68,7 @@ export async function handleCreateWindow(
         shell: 'default',
         cols: initialPane.cols,
         rows: initialPane.rows,
+        sessionId,
         ...(cwd !== undefined ? { cwd } : {}),
       });
       // Update connection state

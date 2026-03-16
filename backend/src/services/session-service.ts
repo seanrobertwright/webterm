@@ -720,6 +720,29 @@ export class SessionService {
   }
 
   /**
+   * Insert a pre-built pane into the database (used when panes are created
+   * outside of createPane, e.g. during split operations).
+   */
+  insertPane(windowId: string, pane: Pane): void {
+    const db = getDatabase();
+    db.prepare(`
+      INSERT OR IGNORE INTO panes (id, window_id, shell, cwd, cols, rows, connection_state, created_at, title, marked)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      pane.id,
+      windowId,
+      pane.shell,
+      pane.cwd ?? null,
+      pane.cols,
+      pane.rows,
+      pane.connectionState,
+      pane.createdAt,
+      pane.title ?? '',
+      pane.marked ? 1 : 0,
+    );
+  }
+
+  /**
    * Delete a pane
    */
   deletePane(paneId: string): boolean {

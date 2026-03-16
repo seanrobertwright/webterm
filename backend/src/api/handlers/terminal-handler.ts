@@ -30,6 +30,7 @@ import { sessionService } from '../../services/session-service.js';
 import { encodeBinaryMessage, MessageType } from '../protocol.js';
 import {
   splitLayout,
+  splitLayoutMainVertical,
   removePane as removePaneFromLayout,
   countPanes,
   validatePaneLimit,
@@ -141,6 +142,7 @@ export async function handleCreate(
       shell: shell ?? 'default',
       cols: 80,
       rows: 24,
+      sessionId: ctx.sessionId,
     };
     if (cwd) spawnOpts.cwd = cwd;
     const ptyInstance = ptyManager.spawn(paneId, spawnOpts);
@@ -278,16 +280,11 @@ export async function handleSplit(
       shell: shell ?? 'default',
       cols: 80,
       rows: 24,
+      sessionId: ctx.sessionId,
     });
 
-    // Update layout tree
-    const newLayout = splitLayout(ctx.layout, paneId, direction, newPaneId);
-    if (!newLayout) {
-      // Target pane not found in layout — kill the PTY we just spawned
-      ptyManager.kill(newPaneId);
-      sendError(ctx.ws, 'PANE_NOT_FOUND', `Pane ${paneId} not found in layout`, paneId);
-      return;
-    }
+    // Use main-vertical layout: main pane stays left, new panes stack on the right
+    const newLayout = splitLayoutMainVertical(ctx.layout, newPaneId);
 
     // Update context with the new layout
     ctx.layout = newLayout;
@@ -306,6 +303,9 @@ export async function handleSplit(
       marked: false,
       currentCommand: null,
     };
+
+    // Persist pane to DB so it survives reconnection
+    sessionService.insertPane(ctx.windowId, newPane);
 
     // Persist layout to DB
     sessionService.updateWindowLayout(ctx.windowId, newLayout);

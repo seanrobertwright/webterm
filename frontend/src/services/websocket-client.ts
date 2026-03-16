@@ -105,7 +105,7 @@ export class WebSocketClient {
   }
 
   /** Connect to WebSocket server */
-  connect(sessionId?: string): void {
+  connect(sessionId?: string, cwd?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       // Allow reconnection when switching to a different session
       if (sessionId && sessionId !== this.sessionId) {
@@ -131,6 +131,9 @@ export class WebSocketClient {
     const url = new URL(this.config.url);
     if (sessionId) {
       url.searchParams.set('sessionId', sessionId);
+    }
+    if (cwd) {
+      url.searchParams.set('cwd', cwd);
     }
 
     try {

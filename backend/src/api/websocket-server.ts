@@ -273,6 +273,7 @@ function parseQueryParams(request: IncomingMessage): Map<string, string> {
 async function handleConnection(ws: WebSocket, request: IncomingMessage): Promise<void> {
   const params = parseQueryParams(request);
   const requestedSessionId = params.get('sessionId');
+  const requestedCwd = params.get('cwd') || undefined;
 
   let sessionId: string;
   let session: Session;
@@ -483,6 +484,8 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
           shell: dbPane.shell,
           cols: dbPane.cols,
           rows: dbPane.rows,
+          sessionId,
+          ...(requestedCwd ? { cwd: requestedCwd } : {}),
         });
 
         // Update pane connection state in DB
@@ -510,10 +513,11 @@ async function handleConnection(ws: WebSocket, request: IncomingMessage): Promis
         // Re-spawn PTYs for panes that aren't already running
         for (const pane of win.panes) {
           if (!ptyManager.hasPty(pane.id)) {
-            const spawnOpts: { shell: typeof pane.shell; cols: number; rows: number; cwd?: string } = {
+            const spawnOpts: { shell: typeof pane.shell; cols: number; rows: number; cwd?: string; sessionId?: string } = {
               shell: pane.shell,
               cols: pane.cols,
               rows: pane.rows,
+              sessionId,
             };
             if (pane.cwd !== null) {
               spawnOpts.cwd = pane.cwd;

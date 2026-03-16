@@ -19,6 +19,10 @@ webterm_command() {
   local session_id="${WEBTERM_SESSION_ID:-}"
   local pane_id="${WEBTERM_PANE_ID:-}"
 
+  # Debug logging
+  local logfile="${TMPDIR:-/tmp}/webterm-shim.log"
+  echo "[$(date '+%H:%M:%S')] CMD='$cmd' SID='$session_id' PID='$pane_id'" >> "$logfile"
+
   # Escape the command string for safe JSON embedding
   local escaped_cmd
   escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/$//' | tr '\n' ' ')
@@ -26,14 +30,19 @@ webterm_command() {
   local body
   body="{\"command\":\"${escaped_cmd}\",\"sessionId\":\"${session_id}\",\"paneId\":\"${pane_id}\"}"
 
+  echo "[$(date '+%H:%M:%S')] BODY=$body" >> "$logfile"
+
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -d "$body" \
     "${WEBTERM_BASE}/command" 2>/dev/null) || {
+    echo "[$(date '+%H:%M:%S')] CURL FAILED" >> "$logfile"
     echo "webterm: failed to connect to WebTerm backend at ${WEBTERM_BASE}" >&2
     exit 1
   }
+
+  echo "[$(date '+%H:%M:%S')] RESP=$response" >> "$logfile"
 
   # Parse response
   local success

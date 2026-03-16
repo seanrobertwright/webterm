@@ -88,6 +88,91 @@ export function splitLayout(
 }
 
 /**
+ * Split using a "main-vertical" strategy: the first (main) pane stays on
+ * the left, and all subsequent panes are stacked vertically on the right.
+ *
+ * Layout progression:
+ *   1 pane  → leaf(main)
+ *   2 panes → horizontal [ main | new ]
+ *   3 panes → horizontal [ main | vertical [ pane2, new ] ]
+ *   4 panes → horizontal [ main | vertical [ pane2, pane3, new ] ]
+ *
+ * @param layout  Current layout tree
+ * @param newPaneId  The pane to add
+ * @param mainRatio  Width ratio for the main pane (default 0.5)
+ * @returns The new layout tree
+ */
+export function splitLayoutMainVertical(
+  layout: Layout,
+  newPaneId: string,
+  mainRatio: number = 0.5,
+): Layout {
+  // Case 1: Single leaf → create horizontal split [main | new]
+  if (layout.type === 'leaf') {
+    return {
+      type: 'horizontal',
+      children: [
+        layout,
+        { type: 'leaf', paneId: newPaneId },
+      ],
+      sizes: [mainRatio, 1 - mainRatio],
+    };
+  }
+
+  // Case 2: Already a horizontal root with exactly 2 children
+  if (layout.type === 'horizontal' && layout.children && layout.children.length === 2) {
+    const mainChild = layout.children[0]!;
+    const rightChild = layout.children[1]!;
+
+    // If right child is a leaf, wrap it + new into a vertical stack
+    if (rightChild.type === 'leaf') {
+      const rightPaneCount = 2;
+      return {
+        ...layout,
+        children: [
+          mainChild,
+          {
+            type: 'vertical',
+            children: [
+              rightChild,
+              { type: 'leaf', paneId: newPaneId },
+            ],
+            sizes: Array(rightPaneCount).fill(1 / rightPaneCount),
+          },
+        ],
+      };
+    }
+
+    // If right child is already a vertical stack, append to it
+    if (rightChild.type === 'vertical' && rightChild.children) {
+      const newChildren = [...rightChild.children, { type: 'leaf' as const, paneId: newPaneId }];
+      const evenSize = 1 / newChildren.length;
+      return {
+        ...layout,
+        children: [
+          mainChild,
+          {
+            ...rightChild,
+            children: newChildren,
+            sizes: Array(newChildren.length).fill(evenSize),
+          },
+        ],
+      };
+    }
+  }
+
+  // Fallback: treat as a regular horizontal split on the whole layout
+  return {
+    type: 'horizontal',
+    children: [
+      layout,
+      { type: 'leaf', paneId: newPaneId },
+    ],
+    sizes: [mainRatio, 1 - mainRatio],
+  };
+}
+
+/**
  * Remove a pane from the layout tree
  * @param layout The current layout tree
  * @param paneId The pane to remove

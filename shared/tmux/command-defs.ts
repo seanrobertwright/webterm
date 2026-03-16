@@ -212,7 +212,7 @@ defaultRegistry
       { short: 'c', takesValue: true, description: 'Working directory' },
       { short: 'd', takesValue: false, description: 'Do not make active' },
     ],
-    args: [],
+    args: [{ name: 'shell-command', required: false }],
   })
   .register({
     name: 'kill-pane',

@@ -12,6 +12,7 @@ import {
 } from '../services/websocket-client';
 import type { WebSocketState } from '../types';
 import type { ServerMessage, BinaryMessageTypeCode } from '@webterm/shared/index';
+import { useSettingsStore } from '../stores/settings-store';
 
 // ============================================================================
 // Types
@@ -139,7 +140,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
 
     // Auto-connect if enabled
     if (autoConnect) {
-      client.connect(initialSessionId);
+      const defaultStartDir = useSettingsStore.getState().defaultStartDir || undefined;
+      client.connect(initialSessionId, defaultStartDir);
     }
 
     // Update initial state

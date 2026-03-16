@@ -160,7 +160,18 @@ export class PtyManager {
     const pathSep = os.platform() === 'win32' ? ';' : ':';
     const pathKey = os.platform() === 'win32' ? 'Path' : 'PATH';
     const currentPath = env?.[pathKey] ?? process.env[pathKey] ?? process.env['PATH'] ?? '';
-    tmuxEnv[pathKey] = `${TMUX_SHIM_DIR}${pathSep}${currentPath}`;
+
+    if (os.platform() === 'win32') {
+      // On Windows, add both the native path AND the Unix-style path
+      // so that Git Bash (used by tools like Claude Code) can also find the shim.
+      // Git Bash can't resolve Windows-style paths (C:\...) in PATH.
+      const unixShimDir = TMUX_SHIM_DIR.replace(/^([A-Za-z]):/, (_m, d: string) => `/${d.toLowerCase()}`).replace(/\\/g, '/');
+      tmuxEnv[pathKey] = `${TMUX_SHIM_DIR}${pathSep}${currentPath}`;
+      // Also set PATH (uppercase) for Git Bash / MSYS2 which reads PATH not Path
+      tmuxEnv['PATH'] = `${unixShimDir}:${currentPath.replace(/;/g, ':')}`;
+    } else {
+      tmuxEnv[pathKey] = `${TMUX_SHIM_DIR}${pathSep}${currentPath}`;
+    }
 
     logger.info(`Spawning PTY for pane ${paneId}: ${shellPath} (${cols}x${rows}) in ${cwd}`);
 

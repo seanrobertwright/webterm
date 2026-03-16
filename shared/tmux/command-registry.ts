@@ -278,6 +278,44 @@ export class CommandRegistry {
             flags.set(flagName, true);
             i++;
           }
+        } else if (flagName.length > 1 && !flagName.startsWith('-')) {
+          // Combined short flags like -dP → -d -P
+          // Expand each character as a separate flag. If the last flag takes
+          // a value, consume the next token.
+          let allValid = true;
+          for (let ci = 0; ci < flagName.length; ci++) {
+            const ch = flagName[ci]!;
+            const chDef = flagLookup.get(ch);
+            if (!chDef) {
+              allValid = false;
+              break;
+            }
+          }
+
+          if (allValid) {
+            for (let ci = 0; ci < flagName.length; ci++) {
+              const ch = flagName[ci]!;
+              const chDef = flagLookup.get(ch)!;
+              if (chDef.takesValue) {
+                // If there are remaining chars, use them as the value
+                const remaining = flagName.slice(ci + 1);
+                if (remaining.length > 0) {
+                  flags.set(ch, remaining);
+                  break; // consumed rest of combined string as value
+                } else if (i + 1 < tokens.length) {
+                  flags.set(ch, tokens[i + 1]!);
+                  i++; // extra advance for consumed value token
+                }
+              } else {
+                flags.set(ch, true);
+              }
+            }
+            i++;
+          } else {
+            // Not all chars are valid flags -- treat as positional
+            positional.push(token);
+            i++;
+          }
         } else {
           // Unknown flag -- treat as positional
           positional.push(token);
