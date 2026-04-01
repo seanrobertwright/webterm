@@ -41,16 +41,72 @@ npm run dev
 
 The application will be available at:
 - Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
-- WebSocket: ws://localhost:3000/ws
+- Backend API: http://localhost:9174
+- WebSocket: ws://localhost:9174/ws
 
-### Production Build
+### Docker (Recommended)
+
+The easiest way to run WebTerm is with Docker Compose. The Docker image comes with Claude Code pre-installed plus common dev tools (git, vim, jq, tmux, etc.).
+
+#### Development
+
+```bash
+# Build and start dev containers (hot reload enabled)
+docker compose up --build
+
+# Or run in the background
+docker compose up --build -d
+```
+
+This starts two containers:
+- **webterm-backend** — Node.js backend with tsx watch (auto-restarts on changes)
+- **webterm-frontend** — Vite dev server with HMR
+
+Source files are volume-mounted so edits on your host are reflected immediately.
+
+Open http://localhost:5173 in your browser.
+
+#### Production
+
+```bash
+# Build and start the production container
+docker compose --profile prod up --build webterm-prod
+
+# Or in the background
+docker compose --profile prod up --build -d webterm-prod
+```
+
+The production build compiles everything into a single container serving both the API and the static frontend on port 9174.
+
+Open http://localhost:9174 in your browser.
+
+#### Rebuild After Dockerfile Changes
+
+```bash
+# Force rebuild (e.g. after adding packages to Dockerfile)
+docker compose build --no-cache
+docker compose up -d
+```
+
+#### Data Persistence
+
+Session data is stored in a Docker volume (`webterm-data`). It persists across container restarts.
+
+```bash
+# View volumes
+docker volume ls | grep webterm
+
+# Remove data (reset all sessions)
+docker compose down -v
+```
+
+### Local (No Docker)
 
 ```bash
 # Build all packages
 npm run build
 
-# Start backend server
+# Start backend server (serves frontend in production mode)
 cd backend && npm start
 ```
 
@@ -114,7 +170,7 @@ webterm/
 
 ### WebSocket Protocol
 
-Connect to `ws://localhost:3000/ws?sessionId={optional}` for real-time terminal I/O.
+Connect to `ws://localhost:9174/ws?sessionId={optional}` for real-time terminal I/O.
 
 **Binary messages** (for terminal I/O):
 - Format: `[type:1][paneIdLength:1][paneId:N][payload:M]`
@@ -142,7 +198,7 @@ Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | 3000 | Backend server port |
+| `PORT` | 9174 | Backend server port |
 | `HOST` | localhost | Backend bind address |
 | `WEBTERM_DB_PATH` | ./data/webterm.db | SQLite database path |
 | `LOG_LEVEL` | info | Logging level |

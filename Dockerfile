@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates gnupg gosu \
   && rm -rf /var/lib/apt/lists/*
 
+# Install Claude Code globally
+RUN npm install -g @anthropic-ai/claude-code
+
 # Configure non-root user for terminal sessions
 # (Claude Code refuses --dangerously-skip-permissions as root)
 # node:20-bookworm already ships a 'node' user (uid 1000). Give it sudo + bash.
@@ -91,6 +94,9 @@ RUN apt-get update && apt-get install -y \
     zip unzip tar gzip \
     ca-certificates gnupg gosu \
   && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code globally
+RUN npm install -g @anthropic-ai/claude-code
 
 # Configure non-root user (node:20-bookworm ships 'node' user at uid 1000)
 RUN usermod -s /bin/bash node \

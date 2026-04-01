@@ -75,6 +75,16 @@ Plans:
 - Logo upload/customization
 - Settings import/export
 
+### Phase 3: TMUX / PSMUX refactor
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 2
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 3 to break down)
+
 ---
 
 *Milestone: Session Management*

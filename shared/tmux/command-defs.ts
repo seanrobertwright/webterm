@@ -235,6 +235,8 @@ defaultRegistry
       { short: 'D', takesValue: false, description: 'Select down' },
       { short: 'm', takesValue: false, description: 'Mark pane' },
       { short: 'M', takesValue: false, description: 'Unmark pane' },
+      { short: 'T', takesValue: true, description: 'Set pane title' },
+      { short: 'P', takesValue: true, description: 'Set pane style' },
     ],
     args: [],
   })
@@ -399,6 +401,7 @@ defaultRegistry
       { short: 'w', takesValue: false, description: 'Window scope' },
       { short: 'p', takesValue: false, description: 'Pane scope' },
       { short: 'u', takesValue: false, description: 'Unset option' },
+      { short: 't', takesValue: true, description: 'Target pane/window' },
     ],
     args: [
       { name: 'option-name', required: true, completionKind: 'option' },
@@ -415,6 +418,7 @@ defaultRegistry
       { short: 'w', takesValue: false, description: 'Window scope' },
       { short: 'p', takesValue: false, description: 'Pane scope' },
       { short: 'v', takesValue: false, description: 'Value only' },
+      { short: 't', takesValue: true, description: 'Target pane/window' },
     ],
     args: [],
   })

@@ -11,63 +11,97 @@ set -euo pipefail
 WEBTERM_PORT="${WEBTERM_PORT:-9174}"
 WEBTERM_BASE="http://localhost:${WEBTERM_PORT}/api/v1"
 
+# Debug logging helper
+LOGFILE="${TMPDIR:-/tmp}/webterm-shim.log"
+log() {
+  echo "[$(date '+%H:%M:%S')] $*" >> "$LOGFILE"
+}
+
 # Helper: POST a command to the WebTerm REST API
 # Accepts the full command string as a single argument.
-# Uses python/node/jq for proper JSON escaping if available, falls back to sed.
+# Uses jq for safe JSON encoding/decoding (installed in Docker via Dockerfile).
 webterm_command() {
   local cmd="$1"
   local session_id="${WEBTERM_SESSION_ID:-}"
   local pane_id="${WEBTERM_PANE_ID:-}"
 
-  # Debug logging
-  local logfile="${TMPDIR:-/tmp}/webterm-shim.log"
-  echo "[$(date '+%H:%M:%S')] CMD='$cmd' SID='$session_id' PID='$pane_id'" >> "$logfile"
+  log "CMD='$cmd' SID='$session_id' PID='$pane_id'"
 
-  # Escape the command string for safe JSON embedding
-  local escaped_cmd
-  escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/$//' | tr '\n' ' ')
-
+  # Build JSON body using jq for correct escaping of all special characters
   local body
-  body="{\"command\":\"${escaped_cmd}\",\"sessionId\":\"${session_id}\",\"paneId\":\"${pane_id}\"}"
+  if command -v jq >/dev/null 2>&1; then
+    body=$(jq -n -c \
+      --arg cmd "$cmd" \
+      --arg sid "$session_id" \
+      --arg pid "$pane_id" \
+      '{command: $cmd, sessionId: $sid, paneId: $pid}')
+  else
+    # Fallback: manual JSON escaping (handles \, ", tabs, newlines)
+    local escaped_cmd
+    escaped_cmd=$(printf '%s' "$cmd" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | tr '\n' ' ' | tr -d '\r')
+    local escaped_sid
+    escaped_sid=$(printf '%s' "$session_id" | tr -d '\r')
+    local escaped_pid
+    escaped_pid=$(printf '%s' "$pane_id" | tr -d '\r')
+    body="{\"command\":\"${escaped_cmd}\",\"sessionId\":\"${escaped_sid}\",\"paneId\":\"${escaped_pid}\"}"
+  fi
 
-  echo "[$(date '+%H:%M:%S')] BODY=$body" >> "$logfile"
+  log "BODY=$body"
 
   local response
   response=$(curl -s -X POST \
     -H "Content-Type: application/json" \
     -d "$body" \
     "${WEBTERM_BASE}/command" 2>/dev/null) || {
-    echo "[$(date '+%H:%M:%S')] CURL FAILED" >> "$logfile"
+    log "CURL FAILED"
     echo "webterm: failed to connect to WebTerm backend at ${WEBTERM_BASE}" >&2
     exit 1
   }
 
-  echo "[$(date '+%H:%M:%S')] RESP=$response" >> "$logfile"
+  log "RESP=$response"
 
-  # Parse response
-  local success
-  success=$(echo "$response" | grep -o '"success":\s*true' || true)
-
-  if [ -n "$success" ]; then
-    # Extract output if present -- handle escaped characters in the output
+  # Parse response using jq if available, else fallback to grep/sed
+  if command -v jq >/dev/null 2>&1; then
+    local success
+    success=$(echo "$response" | jq -r '.success // false' 2>/dev/null || echo "false")
     local output
-    output=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
-    if [ -n "$output" ]; then
-      echo "$output"
+    output=$(echo "$response" | jq -r '.output // empty' 2>/dev/null || true)
+
+    if [ "$success" = "true" ]; then
+      if [ -n "$output" ]; then
+        echo "$output"
+      fi
+      exit 0
+    else
+      local error_msg
+      error_msg=$(echo "$response" | jq -r '.output // .error // .message // "command failed"' 2>/dev/null || echo "command failed")
+      echo "webterm: ${error_msg}" >&2
+      exit 1
     fi
-    exit 0
   else
-    # Extract error message
-    local error_msg
-    error_msg=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
-    if [ -z "$error_msg" ]; then
-      error_msg=$(echo "$response" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+    # Fallback: grep/sed-based response parsing
+    local success
+    success=$(echo "$response" | grep -o '"success":\s*true' || true)
+
+    if [ -n "$success" ]; then
+      local output
+      output=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+      if [ -n "$output" ]; then
+        echo "$output"
+      fi
+      exit 0
+    else
+      local error_msg
+      error_msg=$(echo "$response" | sed -n 's/.*"output":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+      if [ -z "$error_msg" ]; then
+        error_msg=$(echo "$response" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+      fi
+      if [ -z "$error_msg" ]; then
+        error_msg=$(echo "$response" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
+      fi
+      echo "webterm: ${error_msg:-command failed}" >&2
+      exit 1
     fi
-    if [ -z "$error_msg" ]; then
-      error_msg=$(echo "$response" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' 2>/dev/null || true)
-    fi
-    echo "webterm: ${error_msg:-command failed}" >&2
-    exit 1
   fi
 }
 
@@ -177,6 +211,12 @@ case "$COMMAND" in
     ;;
   select-layout|selectl)
     webterm_command "$(build_command_string "select-layout" "$@")"
+    ;;
+  kill-window|killw)
+    webterm_command "$(build_command_string "kill-window" "$@")"
+    ;;
+  rename-window|renamew)
+    webterm_command "$(build_command_string "rename-window" "$@")"
     ;;
   *)
     # For unhandled commands, try passing through to the API

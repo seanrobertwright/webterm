@@ -67,6 +67,12 @@ export class CommandService {
    * Routes to the appropriate handler by command name.
    */
   execute(parsed: ParsedCommand, ctx: CommandContext): CommandResult {
+    logger.debug('Command dispatch', {
+      command: parsed.command,
+      flags: Object.fromEntries(parsed.flags),
+      positional: parsed.positional,
+      ctx,
+    });
     try {
       switch (parsed.command) {
         // ================================================================
@@ -373,11 +379,22 @@ export class CommandService {
       const isPane = parsed.flags.get('p') === true;
       const isSession = parsed.flags.get('s') === true;
       const isUnset = parsed.flags.get('u') === true;
+      const targetFlag = parsed.flags.get('t');
+
+      // If -t is provided, use the target pane/window as context
+      let effectiveCtx = ctx;
+      if (typeof targetFlag === 'string') {
+        const resolvedPaneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
+        const pane = sessionService.getPane(resolvedPaneId);
+        if (pane) {
+          effectiveCtx = { ...ctx, paneId: resolvedPaneId, windowId: pane.windowId };
+        }
+      }
 
       // Determine scope and scopeId
       const { scope, scopeId } = this.resolveOptionScope(
         { isGlobal, isWindow, isPane, isSession },
-        ctx,
+        effectiveCtx,
       );
 
       const optionName = parsed.positional[0];
@@ -1109,9 +1126,26 @@ export class CommandService {
     const goDown = parsed.flags.get('D') === true;
     const markPane = parsed.flags.get('m') === true;
     const unmarkPane = parsed.flags.get('M') === true;
+    const titleFlag = parsed.flags.get('T');
+    const styleFlag = parsed.flags.get('P');
 
     // Handle mark/unmark on the current pane (or target)
     const targetPaneId = this.resolvePaneTarget(targetFlag, ctx.paneId);
+
+    // Handle -T (set pane title) — used by Claude Code to label agent panes
+    if (typeof titleFlag === 'string') {
+      const pane = sessionService.getPane(targetPaneId);
+      if (pane) {
+        sessionService.updatePaneTitle(targetPaneId, titleFlag);
+      }
+      return { output: targetPaneId, success: true };
+    }
+
+    // Handle -P (set pane style) — used by Claude Code for agent pane colors
+    if (typeof styleFlag === 'string') {
+      // Acknowledge the style setting (cosmetic, not fully implemented)
+      return { output: targetPaneId, success: true };
+    }
 
     if (markPane) {
       sessionService.updatePaneMarked(targetPaneId, true);
@@ -1486,11 +1520,57 @@ export class CommandService {
    */
   private resolvePaneTarget(target: string | boolean | undefined, fallback: string): string {
     if (typeof target !== 'string') return fallback;
-    // Try tmux-style %N format
+
+    // Try tmux-style %N format (stable pane ID)
     if (target.startsWith('%')) {
       const resolved = ptyManager.resolveTmuxPaneId(target);
       if (resolved) return resolved;
     }
+
+    // Try session:window.pane format (used by Claude Code agent teams)
+    // Formats: "session:window.pane", ":window.pane", ".pane", "session:window"
+    const colonIdx = target.indexOf(':');
+    const dotIdx = target.lastIndexOf('.');
+    if (colonIdx !== -1 || (dotIdx !== -1 && /^\d+$/.test(target.slice(dotIdx + 1)))) {
+      let paneIndex: number | undefined;
+
+      if (dotIdx !== -1 && dotIdx > colonIdx) {
+        // Has a .pane suffix — extract the pane index
+        const paneStr = target.slice(dotIdx + 1);
+        paneIndex = parseInt(paneStr, 10);
+      }
+
+      if (paneIndex !== undefined && !isNaN(paneIndex)) {
+        // Resolve pane by index within the current window context
+        const resolved = ptyManager.resolveTmuxPaneId(`%${paneIndex}`);
+        if (resolved) return resolved;
+
+        // Also try looking up by index in the current window's layout
+        // (pane indices may not match tmux %N indices)
+        const allSessions = sessionService.getAllSessions();
+        for (const session of allSessions) {
+          const fullSession = sessionService.getSession(session.id);
+          if (!fullSession) continue;
+          for (const win of fullSession.windows) {
+            const paneIds = getPaneIds(win.layout);
+            if (paneIndex < paneIds.length) {
+              const resolvedId = paneIds[paneIndex];
+              if (resolvedId && ptyManager.hasPty(resolvedId)) {
+                return resolvedId;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Try as a bare numeric pane index
+    if (/^\d+$/.test(target)) {
+      const paneIndex = parseInt(target, 10);
+      const resolved = ptyManager.resolveTmuxPaneId(`%${paneIndex}`);
+      if (resolved) return resolved;
+    }
+
     return target;
   }
 
@@ -1611,6 +1691,65 @@ export class CommandService {
     const cwdFlag = parsed.flags.get('c');
     const cwd = typeof cwdFlag === 'string' ? cwdFlag : undefined;
 
+    // Rescue -P / -F / -d flags from positional args.
+    // Claude Code often uses `split-window -d -- -P -F '#{pane_id}'` where the
+    // `--` separator causes -P/-F to become positional. Detect this and promote
+    // them back to flags so the format output works correctly.
+    let printFlag = parsed.flags.get('P') === true;
+    let formatFlag = parsed.flags.get('F');
+    let detachFlag = parsed.flags.get('d') === true;
+    const cleanedPositional: string[] = [];
+
+    let horizontalFlag = parsed.flags.get('h') === true;
+
+    for (let i = 0; i < parsed.positional.length; i++) {
+      const arg = parsed.positional[i]!;
+      if (arg === '-h' && !horizontalFlag) {
+        horizontalFlag = true;
+      } else if (arg === '-P' && !printFlag) {
+        printFlag = true;
+      } else if (arg === '-d' && !detachFlag) {
+        detachFlag = true;
+      } else if (arg === '-F' && typeof formatFlag !== 'string' && i + 1 < parsed.positional.length) {
+        formatFlag = parsed.positional[i + 1]!;
+        i++; // skip the format value
+      } else if (arg.startsWith('-') && arg.length > 1 && !arg.startsWith('--')) {
+        // Handle combined flags like -dP or -dPF in positional
+        let allKnown = true;
+        const chars = arg.slice(1);
+        for (const ch of chars) {
+          if (!['d', 'P', 'h', 'v'].includes(ch)) {
+            // -F may appear as last char in combined flag with value following
+            if (ch === 'F' && typeof formatFlag !== 'string') continue;
+            allKnown = false;
+            break;
+          }
+        }
+        if (allKnown) {
+          for (let ci = 0; ci < chars.length; ci++) {
+            const ch = chars[ci]!;
+            if (ch === 'P') printFlag = true;
+            else if (ch === 'd') detachFlag = true;
+            else if (ch === 'F') {
+              // Format value is either remaining chars or next positional
+              const remaining = chars.slice(ci + 1);
+              if (remaining.length > 0) {
+                formatFlag = remaining;
+                break;
+              } else if (i + 1 < parsed.positional.length) {
+                formatFlag = parsed.positional[i + 1]!;
+                i++;
+              }
+            }
+          }
+        } else {
+          cleanedPositional.push(arg);
+        }
+      } else {
+        cleanedPositional.push(arg);
+      }
+    }
+
     // Spawn a new PTY for the new pane
     const ptyInstance = ptyManager.spawn(newPaneId, {
       shell: 'default',
@@ -1626,7 +1765,7 @@ export class CommandService {
 
     // Send the shell command to the new pane if one was provided
     // (e.g. `tmux split-window "claude --arg"`)
-    const shellCommand = parsed.positional.join(' ');
+    const shellCommand = cleanedPositional.join(' ');
     if (shellCommand) {
       // Small delay to let the shell initialize before sending the command
       setTimeout(() => {
@@ -1668,12 +1807,12 @@ export class CommandService {
       targetPaneId,
       newPaneId,
       windowId,
+      printFlag,
+      formatFlag: typeof formatFlag === 'string' ? formatFlag : undefined,
+      shellCommand: shellCommand || undefined,
     });
 
     // Handle -P -F format output
-    const printFlag = parsed.flags.get('P') === true;
-    const formatFlag = parsed.flags.get('F');
-
     if (printFlag && typeof formatFlag === 'string') {
       const formatted = this.formatTmuxString(formatFlag, newPaneId, { ...ctx, windowId });
       return { output: formatted, success: true };
@@ -1702,6 +1841,23 @@ export class CommandService {
     const windowName = typeof nameFlag === 'string' ? nameFlag : `Window ${Date.now()}`;
     const cwdFlag = parsed.flags.get('c');
     const cwd = typeof cwdFlag === 'string' ? cwdFlag : undefined;
+
+    // Rescue -P / -F flags from positional args (same pattern as split-window).
+    let printFlag = parsed.flags.get('P') === true;
+    let formatFlag = parsed.flags.get('F');
+    const cleanedPositional: string[] = [];
+
+    for (let i = 0; i < parsed.positional.length; i++) {
+      const arg = parsed.positional[i]!;
+      if (arg === '-P' && !printFlag) {
+        printFlag = true;
+      } else if (arg === '-F' && typeof formatFlag !== 'string' && i + 1 < parsed.positional.length) {
+        formatFlag = parsed.positional[i + 1]!;
+        i++;
+      } else {
+        cleanedPositional.push(arg);
+      }
+    }
 
     // Create window via session service (persists to DB, creates initial pane)
     const window = sessionService.createWindow(ctx.sessionId, windowName, 'default', cwd);
@@ -1735,8 +1891,6 @@ export class CommandService {
     });
 
     // Handle -P -F format output
-    const printFlag = parsed.flags.get('P') === true;
-    const formatFlag = parsed.flags.get('F');
     const paneId = initialPane?.id ?? '';
 
     if (printFlag && typeof formatFlag === 'string') {

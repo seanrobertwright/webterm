@@ -51,7 +51,7 @@ function getDefaultWebSocketUrl(): string {
   // In dev mode, connect directly to backend to bypass Vite proxy
   // (Vite's WS proxy doesn't recover after backend restarts)
   if (import.meta.env.DEV) {
-    return `ws://${window.location.hostname}:${DEV_BACKEND_PORT}/ws`;
+    return `ws://localhost:${DEV_BACKEND_PORT}/ws`;
   }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws`;

@@ -1,10 +1,24 @@
 @echo off
-REM WebTerm tmux shim for Windows
+REM WebTerm tmux shim for Windows (CMD)
 REM Intercepts tmux commands from child processes (e.g. Claude Code) and
 REM translates them into HTTP API calls to the WebTerm backend.
+REM
+REM Delegates to the PowerShell shim for proper JSON handling.
 
 setlocal enabledelayedexpansion
 
+REM Check if PowerShell is available (it always is on Windows 10+)
+where pwsh >nul 2>&1 && (
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0tmux.ps1" %*
+    exit /b !errorlevel!
+)
+
+where powershell >nul 2>&1 && (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tmux.ps1" %*
+    exit /b !errorlevel!
+)
+
+REM Fallback: direct curl-based implementation
 if "%WEBTERM_PORT%"=="" set "WEBTERM_PORT=9174"
 set "WEBTERM_BASE=http://localhost:%WEBTERM_PORT%/api/v1"
 
@@ -65,15 +79,28 @@ if defined ARGS (
     set "FULL_CMD=%COMMAND%"
 )
 
-REM Build JSON body - escape backslashes then quotes in command
-set "JSON_CMD=!FULL_CMD:\=\\!"
-set "JSON_CMD=!JSON_CMD:"=\"!"
+REM Build JSON body using PowerShell for safe escaping
+set "SESSION_ID=%WEBTERM_SESSION_ID%"
+set "PANE_ID=%WEBTERM_PANE_ID%"
 
-set "BODY={\"command\":\"!JSON_CMD!\",\"sessionId\":\"%WEBTERM_SESSION_ID%\",\"paneId\":\"%WEBTERM_PANE_ID%\"}"
+REM Use a temp file for the JSON body to avoid escaping issues
+set "TMPBODY=%TEMP%\webterm-shim-%RANDOM%.json"
 
-set "RESPONSE="
-for /f "usebackq delims=" %%i in (`curl -s -X POST -H "Content-Type: application/json" -d "!BODY!" "%WEBTERM_BASE%/command" 2^>nul`) do (
-    set "RESPONSE=%%i"
+REM Try to use PowerShell for proper JSON encoding
+powershell -NoProfile -Command "@{command='!FULL_CMD!';sessionId='!SESSION_ID!';paneId='!PANE_ID!'} | ConvertTo-Json -Compress | Set-Content -NoNewline '!TMPBODY!'" 2>nul
+if %errorlevel% equ 0 (
+    for /f "usebackq delims=" %%i in (`curl -s -X POST -H "Content-Type: application/json" -d @"!TMPBODY!" "%WEBTERM_BASE%/command" 2^>nul`) do (
+        set "RESPONSE=%%i"
+    )
+    del "!TMPBODY!" 2>nul
+) else (
+    REM Fallback: manual JSON construction
+    set "JSON_CMD=!FULL_CMD:\=\\!"
+    set "JSON_CMD=!JSON_CMD:"=\"!"
+    set "BODY={\"command\":\"!JSON_CMD!\",\"sessionId\":\"!SESSION_ID!\",\"paneId\":\"!PANE_ID!\"}"
+    for /f "usebackq delims=" %%i in (`curl -s -X POST -H "Content-Type: application/json" -d "!BODY!" "%WEBTERM_BASE%/command" 2^>nul`) do (
+        set "RESPONSE=%%i"
+    )
 )
 
 if not defined RESPONSE (
@@ -81,18 +108,15 @@ if not defined RESPONSE (
     exit /b 1
 )
 
-REM Check for success
+REM Parse response using PowerShell for reliable JSON handling
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$r = '!RESPONSE!' | ConvertFrom-Json; if ($r.success) { if ($r.output) { Write-Output $r.output }; exit 0 } else { $m = if ($r.output) { $r.output } elseif ($r.error) { $r.error } else { 'command failed' }; Write-Error \"webterm: $m\"; exit 1 }" 2^>nul`) do (
+    echo %%i
+    exit /b 0
+)
+
+REM Fallback: basic response check
 echo !RESPONSE! | findstr /C:"\"success\":true" >nul 2>&1
 if %errorlevel% equ 0 (
-    REM Extract output value (basic parsing)
-    for /f "tokens=2 delims=:" %%a in ('echo !RESPONSE! ^| findstr /C:"output"') do (
-        set "OUT=%%a"
-        REM Remove surrounding quotes and trailing brace
-        set "OUT=!OUT:"=!"
-        set "OUT=!OUT:}=!"
-        set "OUT=!OUT:{=!"
-        if not "!OUT!"=="" echo !OUT!
-    )
     exit /b 0
 ) else (
     echo webterm: command failed >&2

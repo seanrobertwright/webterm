@@ -44,6 +44,11 @@
 - [02-03]: exactOptionalPropertyTypes requires spread conditional for optional fields: ...(value ? { field: value } : {}) instead of field: value || undefined
 - [02-03]: validate-directory returns HTTP 200 with { valid, error? } — path invalidity is a business result, not HTTP error
 
+## Accumulated Context
+
+### Roadmap Evolution
+- Phase 3 added: TMUX / PSMUX refactor
+
 ## Next Steps
 
 - Phase 02 complete. All 3 plans executed successfully.

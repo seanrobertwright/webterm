@@ -54,9 +54,13 @@ export async function handleExecuteCommand(
 
   logger.info('REST command execution', { command, sessionId, windowId, paneId });
 
+  // Strip carriage returns that may come from Windows-style line endings
+  const cleanCommand = command.replace(/\r/g, '').trim();
+
   // Parse the command
-  const parseResult = defaultRegistry.parse(command);
+  const parseResult = defaultRegistry.parse(cleanCommand);
   if (!parseResult.ok) {
+    logger.warn('REST command parse failed', { command: cleanCommand, error: parseResult.error });
     sendJson(res, 400, {
       success: false,
       error: parseResult.error,
